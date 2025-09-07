@@ -54,19 +54,52 @@ run_make() {
             ;;
         "macos")
             export PATH="/opt/homebrew/bin:/usr/local/bin:$PATH"
-            if [ -n "$extra" ]; then
-                cmd=(make $extra $target)
+            
+            # Find PostgreSQL installation and set PG_CONFIG
+            if [ -f "/opt/homebrew/bin/pg_config" ]; then
+                export PG_CONFIG="/opt/homebrew/bin/pg_config"
+            elif [ -f "/usr/local/bin/pg_config" ]; then
+                export PG_CONFIG="/usr/local/bin/pg_config"
             else
-                cmd=(make $target)
+                echo "Error: pg_config not found. PostgreSQL development packages may not be installed."
+                exit 1
             fi
-            # install might require sudo; caller decides to pass install target
+            
+            # Set additional PostgreSQL environment variables
+            export PKG_CONFIG_PATH="/opt/homebrew/lib/pkgconfig:/usr/local/lib/pkgconfig:$PKG_CONFIG_PATH"
+            export LDFLAGS="-L/opt/homebrew/lib -L/usr/local/lib $LDFLAGS"
+            export CPPFLAGS="-I/opt/homebrew/include -I/usr/local/include $CPPFLAGS"
+            
+            if [[ $target == "install" ]]; then
+                # Use sudo for install target on macOS
+                if [ -n "$extra" ]; then
+                    cmd=(sudo make $extra $target)
+                else
+                    cmd=(sudo make $target)
+                fi
+            else
+                if [ -n "$extra" ]; then
+                    cmd=(make $extra $target)
+                else
+                    cmd=(make $target)
+                fi
+            fi
             ;;
         *)
             # linux / other unix
-            if [ -n "$extra" ]; then
-                cmd=(make $extra $target)
+            if [[ $target == "install" ]]; then
+                # Use sudo for install target on Linux/Unix
+                if [ -n "$extra" ]; then
+                    cmd=(sudo make $extra $target)
+                else
+                    cmd=(sudo make $target)
+                fi
             else
-                cmd=(make $target)
+                if [ -n "$extra" ]; then
+                    cmd=(make $extra $target)
+                else
+                    cmd=(make $target)
+                fi
             fi
             ;;
     esac

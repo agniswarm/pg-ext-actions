@@ -65,13 +65,25 @@ install_postgresql_macos() {
         /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
     fi
     
-    # Install PostgreSQL
+    # Install PostgreSQL and development tools
     brew install postgresql@$version
     
     # Add PostgreSQL to PATH for this session and future sessions
     export PATH="/opt/homebrew/opt/postgresql@$version/bin:$PATH"
     echo 'export PATH="/opt/homebrew/opt/postgresql@'$version'/bin:$PATH"' >> ~/.zshrc
     echo 'export PATH="/opt/homebrew/opt/postgresql@'$version'/bin:$PATH"' >> ~/.bash_profile
+    
+    # Set up PostgreSQL development environment
+    export PG_CONFIG="/opt/homebrew/opt/postgresql@$version/bin/pg_config"
+    export PKG_CONFIG_PATH="/opt/homebrew/opt/postgresql@$version/lib/pkgconfig:$PKG_CONFIG_PATH"
+    export LDFLAGS="-L/opt/homebrew/opt/postgresql@$version/lib $LDFLAGS"
+    export CPPFLAGS="-I/opt/homebrew/opt/postgresql@$version/include $CPPFLAGS"
+    
+    # Add environment variables to shell profiles
+    echo 'export PG_CONFIG="/opt/homebrew/opt/postgresql@'$version'/bin/pg_config"' >> ~/.zshrc
+    echo 'export PKG_CONFIG_PATH="/opt/homebrew/opt/postgresql@'$version'/lib/pkgconfig:$PKG_CONFIG_PATH"' >> ~/.zshrc
+    echo 'export LDFLAGS="-L/opt/homebrew/opt/postgresql@'$version'/lib $LDFLAGS"' >> ~/.zshrc
+    echo 'export CPPFLAGS="-I/opt/homebrew/opt/postgresql@'$version'/include $CPPFLAGS"' >> ~/.zshrc
     
     # Start PostgreSQL service
     brew services start postgresql@$version
