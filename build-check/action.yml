@@ -30,7 +30,7 @@ runs:
         case "$(uname -s)" in
           CYGWIN*|MINGW*|MSYS*)
             # Windows - check if extension was built
-            if [ -f "*.dll" ] || [ -f "*.so" ]; then
+            if find . -maxdepth 1 -name "*.dll" -o -name "*.so" | grep -q .; then
               echo "Extension built successfully on Windows"
             else
               echo "Extension build may have failed on Windows"
@@ -39,7 +39,7 @@ runs:
             ;;
           *)
             # Unix-like systems
-            if [ -f "*.so" ]; then
+            if find . -maxdepth 1 -name "*.so" | grep -q .; then
               echo "Extension built successfully"
             else
               echo "Extension build may have failed"
