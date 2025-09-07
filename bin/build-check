@@ -86,17 +86,31 @@ run_make() {
                 fi
             fi
             ;;
-        macos)
-            # prefer Homebrew pg_config if present
-            if [ -x "/opt/homebrew/bin/pg_config" ]; then
-                export PG_CONFIG="/opt/homebrew/bin/pg_config"
-            elif [ -x "/usr/local/bin/pg_config" ]; then
-                export PG_CONFIG="/usr/local/bin/pg_config"
-            fi
-            export PATH="/opt/homebrew/bin:/usr/local/bin:${PATH}"
-            export PKG_CONFIG_PATH="/opt/homebrew/lib/pkgconfig:/usr/local/lib/pkgconfig:${PKG_CONFIG_PATH:-}"
-            export LDFLAGS="-L/opt/homebrew/lib -L/usr/local/lib ${LDFLAGS:-}"
-            export CPPFLAGS="-I/opt/homebrew/include -I/usr/local/include ${CPPFLAGS:-}"
+         macos)
+             # Set up PostgreSQL development environment
+             export PATH="/opt/homebrew/bin:/usr/local/bin:${PATH}"
+             
+             # Find and set PG_CONFIG
+             if [ -x "/opt/homebrew/bin/pg_config" ]; then
+                 export PG_CONFIG="/opt/homebrew/bin/pg_config"
+             elif [ -x "/usr/local/bin/pg_config" ]; then
+                 export PG_CONFIG="/usr/local/bin/pg_config"
+             else
+                 err "pg_config not found. PostgreSQL development packages may not be installed."
+                 err "Please ensure PostgreSQL is installed via Homebrew: brew install postgresql@<version>"
+                 exit 1
+             fi
+             
+             # Set additional PostgreSQL environment variables
+             export PKG_CONFIG_PATH="/opt/homebrew/lib/pkgconfig:/usr/local/lib/pkgconfig:${PKG_CONFIG_PATH:-}"
+             export LDFLAGS="-L/opt/homebrew/lib -L/usr/local/lib ${LDFLAGS:-}"
+             export CPPFLAGS="-I/opt/homebrew/include -I/usr/local/include ${CPPFLAGS:-}"
+             
+             # Debug: Show PostgreSQL environment
+             log "PostgreSQL environment:"
+             log "  PG_CONFIG: ${PG_CONFIG}"
+             log "  PATH: ${PATH}"
+             log "  PKG_CONFIG_PATH: ${PKG_CONFIG_PATH}"
 
             if [ "$target" = "install" ]; then
                 if [ -n "$extra" ]; then
@@ -112,22 +126,29 @@ run_make() {
                 fi
             fi
             ;;
-        *)
-            # linux / other unix
-            if [ "$target" = "install" ]; then
-                if [ -n "$extra" ]; then
-                    cmd_arr=( sudo make $extra $target )
-                else
-                    cmd_arr=( sudo make $target )
-                fi
-            else
-                if [ -n "$extra" ]; then
-                    cmd_arr=( make $extra $target )
-                else
-                    cmd_arr=( make $target )
-                fi
-            fi
-            ;;
+         *)
+             # linux / other unix
+             # Ensure pg_config is available
+             if ! command -v pg_config >/dev/null 2>&1; then
+                 err "pg_config not found. PostgreSQL development packages may not be installed."
+                 err "Please install PostgreSQL development packages for your system."
+                 exit 1
+             fi
+             
+             if [ "$target" = "install" ]; then
+                 if [ -n "$extra" ]; then
+                     cmd_arr=( sudo make $extra $target )
+                 else
+                     cmd_arr=( sudo make $target )
+                 fi
+             else
+                 if [ -n "$extra" ]; then
+                     cmd_arr=( make $extra $target )
+                 else
+                     cmd_arr=( make $target )
+                 fi
+             fi
+             ;;
     esac
 
     # execute
