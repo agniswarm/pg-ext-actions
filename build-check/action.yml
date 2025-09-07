@@ -7,7 +7,22 @@ runs:
   using: "composite"
   steps:
     - name: Build and Test Extension
-      run: ${{ github.action_path }}/../bin/build-check
+      run: |
+        # Get the directory of this action
+        ACTION_DIR="${{ github.action_path }}"
+        SCRIPT_PATH="$ACTION_DIR/../bin/build-check"
+        
+        # Ensure the script exists and is executable
+        if [ ! -f "$SCRIPT_PATH" ]; then
+          echo "Error: Script not found at $SCRIPT_PATH"
+          exit 1
+        fi
+        
+        # Make sure it's executable
+        chmod +x "$SCRIPT_PATH"
+        
+        # Run the script
+        "$SCRIPT_PATH"
       shell: bash
       working-directory: ${{ inputs.working-directory }}
     - name: Verify Installation

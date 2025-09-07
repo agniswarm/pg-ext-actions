@@ -49,8 +49,21 @@ run_psql() {
                 "C:\Program Files\PostgreSQL\*\bin\psql.exe" postgres -U postgres -t -q -1 $commands || true
             fi
             ;;
+        "macos")
+            # On macOS, try to find psql in common Homebrew locations
+            if command -v psql &> /dev/null; then
+                psql postgres -U postgres -t -q -1 $commands
+            elif [ -f "/opt/homebrew/bin/psql" ]; then
+                /opt/homebrew/bin/psql postgres -U postgres -t -q -1 $commands
+            elif [ -f "/usr/local/bin/psql" ]; then
+                /usr/local/bin/psql postgres -U postgres -t -q -1 $commands
+            else
+                echo "psql not found on macOS"
+                exit 1
+            fi
+            ;;
         *)
-            # On Unix-like systems, use standard psql
+            # On Linux and other Unix-like systems, use standard psql
             psql postgres -U postgres -t -q -1 $commands
             ;;
     esac

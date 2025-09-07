@@ -68,15 +68,19 @@ install_postgresql_macos() {
     # Install PostgreSQL
     brew install postgresql@$version
     
-    # Add to PATH
-    echo 'export PATH="/opt/homebrew/bin:$PATH"' >> ~/.zshrc
-    echo 'export PATH="/usr/local/bin:$PATH"' >> ~/.zshrc
+    # Add PostgreSQL to PATH for this session and future sessions
+    export PATH="/opt/homebrew/opt/postgresql@$version/bin:$PATH"
+    echo 'export PATH="/opt/homebrew/opt/postgresql@'$version'/bin:$PATH"' >> ~/.zshrc
+    echo 'export PATH="/opt/homebrew/opt/postgresql@'$version'/bin:$PATH"' >> ~/.bash_profile
     
     # Start PostgreSQL service
     brew services start postgresql@$version
     
-    # Create database
-    createdb postgres || true
+    # Wait a moment for the service to start
+    sleep 3
+    
+    # Create database using full path
+    /opt/homebrew/opt/postgresql@$version/bin/createdb postgres || true
     
     # Install contrib if needed
     if [[ $contrib == 'true' ]]; then
@@ -98,14 +102,22 @@ install_postgresql_windows() {
     # Install PostgreSQL
     choco install postgresql --version $version -y
     
-    # Add PostgreSQL to PATH
-    $env:PATH += ";C:\Program Files\PostgreSQL\$version\bin"
+    # Add PostgreSQL to PATH for this session
+    export PATH="$PATH:/c/Program Files/PostgreSQL/$version/bin"
     
-    # Initialize database
-    initdb -D "C:\Program Files\PostgreSQL\$version\data" || true
+    # Wait a moment for installation to complete
+    sleep 5
+    
+    # Initialize database if it doesn't exist
+    if [ ! -d "/c/Program Files/PostgreSQL/$version/data" ]; then
+        "/c/Program Files/PostgreSQL/$version/bin/initdb.exe" -D "/c/Program Files/PostgreSQL/$version/data" || true
+    fi
     
     # Start PostgreSQL service
     net start postgresql-x64-$version || true
+    
+    # Wait for service to start
+    sleep 3
     
     # Install contrib if needed
     if [[ $contrib == 'true' ]]; then

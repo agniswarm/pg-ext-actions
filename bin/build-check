@@ -28,8 +28,17 @@ run_make() {
                 make $args $target
             fi
             ;;
+        "macos")
+            # On macOS, ensure we have the right environment for make
+            export PATH="/opt/homebrew/bin:/usr/local/bin:$PATH"
+            if [[ $target == "install" ]]; then
+                sudo make $args $target
+            else
+                make $args $target
+            fi
+            ;;
         *)
-            # On Unix-like systems, use make with sudo for install
+            # On Linux and other Unix-like systems, use make with sudo for install
             if [[ $target == "install" ]]; then
                 sudo make $args $target
             else
