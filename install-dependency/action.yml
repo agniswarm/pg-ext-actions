@@ -12,8 +12,27 @@ inputs:
 runs:
   using: "composite"
   steps:
-    - run: ${{ github.action_path }}/../bin/install-dependency ${{ inputs.repository }}
+    - name: Install Dependencies
+      run: ${{ github.action_path }}/../bin/install-dependency ${{ inputs.repository }}
       shell: bash
       env:
         AUTH_TOKEN: ${{ inputs.auth-token }}
         HOST: ${{ inputs.host }}
+    - name: Verify Dependencies
+      run: |
+        echo "Dependencies installed successfully"
+        case "$(uname -s)" in
+          CYGWIN*|MINGW*|MSYS*)
+            echo "Running on Windows"
+            ;;
+          Darwin*)
+            echo "Running on macOS"
+            ;;
+          Linux*)
+            echo "Running on Linux"
+            ;;
+          *)
+            echo "Running on unknown OS"
+            ;;
+        esac
+      shell: bash

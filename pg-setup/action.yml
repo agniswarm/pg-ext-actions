@@ -10,7 +10,26 @@ inputs:
 runs:
   using: "composite"
   steps:
-    - run: ${{ github.action_path }}/../bin/pg-setup ${{ inputs.version }}
+    - name: Install PostgreSQL
+      run: ${{ github.action_path }}/../bin/pg-setup ${{ inputs.version }}
       shell: bash
       env:
         CONTRIB: ${{ inputs.install-contrib }}
+    - name: Verify PostgreSQL Installation
+      run: |
+        case "$(uname -s)" in
+          CYGWIN*|MINGW*|MSYS*)
+            # Windows - check if psql is available
+            if command -v psql &> /dev/null; then
+              psql --version
+            else
+              echo "PostgreSQL installation may have failed on Windows"
+              exit 1
+            fi
+            ;;
+          *)
+            # Unix-like systems
+            psql --version
+            ;;
+        esac
+      shell: bash

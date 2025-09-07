@@ -6,6 +6,31 @@ inputs:
 runs:
   using: "composite"
   steps:
-    - run: ${{ github.action_path }}/../bin/build-check
+    - name: Build and Test Extension
+      run: ${{ github.action_path }}/../bin/build-check
+      shell: bash
+      working-directory: ${{ inputs.working-directory }}
+    - name: Verify Installation
+      run: |
+        case "$(uname -s)" in
+          CYGWIN*|MINGW*|MSYS*)
+            # Windows - check if extension was built
+            if [ -f "*.dll" ] || [ -f "*.so" ]; then
+              echo "Extension built successfully on Windows"
+            else
+              echo "Extension build may have failed on Windows"
+              exit 1
+            fi
+            ;;
+          *)
+            # Unix-like systems
+            if [ -f "*.so" ]; then
+              echo "Extension built successfully"
+            else
+              echo "Extension build may have failed"
+              exit 1
+            fi
+            ;;
+        esac
       shell: bash
       working-directory: ${{ inputs.working-directory }}

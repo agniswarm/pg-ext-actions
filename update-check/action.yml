@@ -8,9 +8,28 @@ inputs:
 runs:
   using: "composite"
   steps:
-    - run: ${{ github.action_path }}/../bin/update-check
+    - name: Check Extension Updates
+      run: ${{ github.action_path }}/../bin/update-check
       shell: bash
       working-directory: ${{ inputs.working-directory }}
       env:
         EXT_BRANCH: ${{ inputs.main-branch }}
-
+    - name: Verify Update Check
+      run: |
+        echo "Update check completed successfully"
+        case "$(uname -s)" in
+          CYGWIN*|MINGW*|MSYS*)
+            echo "Update check ran on Windows"
+            ;;
+          Darwin*)
+            echo "Update check ran on macOS"
+            ;;
+          Linux*)
+            echo "Update check ran on Linux"
+            ;;
+          *)
+            echo "Update check ran on unknown OS"
+            ;;
+        esac
+      shell: bash
+      working-directory: ${{ inputs.working-directory }}

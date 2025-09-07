@@ -8,6 +8,44 @@ if [[ -n ${AUTH_TOKEN} ]]; then
     prefix="${AUTH_TOKEN}:x-oauth-basic@"
 fi
 
+# Detect operating system
+detect_os() {
+    case "$(uname -s)" in
+        Linux*)     echo "linux";;
+        Darwin*)    echo "macos";;
+        CYGWIN*|MINGW*|MSYS*) echo "windows";;
+        *)          echo "unknown";;
+    esac
+}
+
+OS=$(detect_os)
+
+# Function to run make with appropriate permissions
+run_make() {
+    local directory=$1
+    local target=$2
+    local args=$3
+    
+    case $OS in
+        "windows")
+            # On Windows, use mingw32-make or make directly
+            if command -v mingw32-make &> /dev/null; then
+                mingw32-make -C ${directory} $args $target
+            else
+                make -C ${directory} $args $target
+            fi
+            ;;
+        *)
+            # On Unix-like systems, use make with sudo for install
+            if [[ $target == "install" ]]; then
+                sudo make -C ${directory} $args $target
+            else
+                make -C ${directory} $args $target
+            fi
+            ;;
+    esac
+}
+
 for repo in $@
 do
     echo "Cloning and building https://${HOST}/${repo}.git..."
@@ -17,6 +55,6 @@ do
     git clone https://${prefix}${HOST}/${repo}.git ${directory}
 
     # build and install extension
-    make -C ${directory} CFLAGS="${CFLAGS}"
-    sudo make -C ${directory} install
+    run_make ${directory} "" "CFLAGS=\"${CFLAGS}\""
+    run_make ${directory} "install"
 done

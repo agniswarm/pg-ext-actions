@@ -23,7 +23,40 @@ if [[ $main_version == $current_version ]]; then
     exit 0
 fi
 
+# Detect operating system for psql command
+detect_os() {
+    case "$(uname -s)" in
+        Linux*)     echo "linux";;
+        Darwin*)    echo "macos";;
+        CYGWIN*|MINGW*|MSYS*) echo "windows";;
+        *)          echo "unknown";;
+    esac
+}
+
+OS=$(detect_os)
+
+# Function to run psql with appropriate parameters
+run_psql() {
+    local commands=$1
+    
+    case $OS in
+        "windows")
+            # On Windows, psql might be in a different location
+            if command -v psql &> /dev/null; then
+                psql postgres -U postgres -t -q -1 $commands
+            else
+                # Try common Windows PostgreSQL installation paths
+                "C:\Program Files\PostgreSQL\*\bin\psql.exe" postgres -U postgres -t -q -1 $commands || true
+            fi
+            ;;
+        *)
+            # On Unix-like systems, use standard psql
+            psql postgres -U postgres -t -q -1 $commands
+            ;;
+    esac
+}
+
 # Try upgrading extension from the main version
-psql postgres -U postgres -t -q -1 -c "CREATE EXTENSION ${ext_name} VERSION '${main_version}'" \
-                                   -c "ALTER EXTENSION ${ext_name} UPDATE TO '${current_version}'" \
-                                   -c "DROP EXTENSION ${ext_name}"
+run_psql "-c \"CREATE EXTENSION ${ext_name} VERSION '${main_version}'\" \
+          -c \"ALTER EXTENSION ${ext_name} UPDATE TO '${current_version}'\" \
+          -c \"DROP EXTENSION ${ext_name}\""

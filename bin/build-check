@@ -2,13 +2,50 @@
 
 set -x
 
+# Detect operating system
+detect_os() {
+    case "$(uname -s)" in
+        Linux*)     echo "linux";;
+        Darwin*)    echo "macos";;
+        CYGWIN*|MINGW*|MSYS*) echo "windows";;
+        *)          echo "unknown";;
+    esac
+}
+
+OS=$(detect_os)
+
+# Function to run make with appropriate permissions
+run_make() {
+    local target=$1
+    local args=$2
+    
+    case $OS in
+        "windows")
+            # On Windows, use mingw32-make or make directly
+            if command -v mingw32-make &> /dev/null; then
+                mingw32-make $args $target
+            else
+                make $args $target
+            fi
+            ;;
+        *)
+            # On Unix-like systems, use make with sudo for install
+            if [[ $target == "install" ]]; then
+                sudo make $args $target
+            else
+                make $args $target
+            fi
+            ;;
+    esac
+}
+
 # build and install extension
-make CFLAGS="${CFLAGS}"
-sudo make install
+run_make "" "CFLAGS=\"${CFLAGS}\""
+run_make "install"
 
 # run regression tests
 status=0
-make installcheck PGUSER=postgres || status=$?
+run_make "installcheck" "PGUSER=postgres" || status=$?
 
 # show diff if needed
 if [[ ${status} -ne 0 ]] && [[ -f regression.diffs ]]; then
