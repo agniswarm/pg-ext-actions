@@ -153,8 +153,8 @@ run_make() {
 
     case "$OS" in
         windows)
-            # Set up PostgreSQL environment for Windows
-            export PATH="/c/Program Files/PostgreSQL/*/bin:$PATH"
+            # Set up PostgreSQL environment for Windows (will be updated after finding pg_config)
+            export PATH="$PATH"
             
             # Find PostgreSQL installation dynamically
             PG_CONFIG_FOUND=""
@@ -195,6 +195,9 @@ run_make() {
             # Set additional PostgreSQL environment variables
             PG_CONFIG_DIR="$(dirname "$PG_CONFIG")"
             PG_ROOT="$(dirname "$PG_CONFIG_DIR")"
+            
+            # Add PostgreSQL bin directory to PATH
+            export PATH="${PG_CONFIG_DIR}:${PATH}"
             
             export PKG_CONFIG_PATH="${PG_ROOT}/lib/pkgconfig:${PKG_CONFIG_PATH:-}"
             export LDFLAGS="-L${PG_ROOT}/lib ${LDFLAGS:-}"
