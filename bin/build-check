@@ -211,23 +211,29 @@ run_make() {
             log "  PKG_CONFIG_PATH: ${PKG_CONFIG_PATH}"
             
             # Try different build methods in order of preference
+            # First try nmake with Makefile.win (preferred for Windows)
             if [ -f "Makefile.win" ] && command -v nmake >/dev/null 2>&1; then
+                log "Using nmake with Makefile.win"
                 if [ -n "$extra" ]; then
                     cmd_arr=( nmake /NOLOGO /F Makefile.win $extra $target )
                 else
                     cmd_arr=( nmake /NOLOGO /F Makefile.win $target )
                 fi
+            # Try mingw32-make with environment variables
             elif command -v mingw32-make >/dev/null 2>&1; then
+                log "Using mingw32-make with environment variables"
                 if [ -n "$extra" ]; then
-                    cmd_arr=( mingw32-make $extra $target )
+                    cmd_arr=( env PG_CONFIG="$PG_CONFIG" PKG_CONFIG_PATH="$PKG_CONFIG_PATH" LDFLAGS="$LDFLAGS" CPPFLAGS="$CPPFLAGS" mingw32-make $extra $target )
                 else
-                    cmd_arr=( mingw32-make $target )
+                    cmd_arr=( env PG_CONFIG="$PG_CONFIG" PKG_CONFIG_PATH="$PKG_CONFIG_PATH" LDFLAGS="$LDFLAGS" CPPFLAGS="$CPPFLAGS" mingw32-make $target )
                 fi
+            # Try regular make as fallback
             else
+                log "Using make as fallback"
                 if [ -n "$extra" ]; then
-                    cmd_arr=( make $extra $target )
+                    cmd_arr=( env PG_CONFIG="$PG_CONFIG" PKG_CONFIG_PATH="$PKG_CONFIG_PATH" LDFLAGS="$LDFLAGS" CPPFLAGS="$CPPFLAGS" make $extra $target )
                 else
-                    cmd_arr=( make $target )
+                    cmd_arr=( env PG_CONFIG="$PG_CONFIG" PKG_CONFIG_PATH="$PKG_CONFIG_PATH" LDFLAGS="$LDFLAGS" CPPFLAGS="$CPPFLAGS" make $target )
                 fi
             fi
             ;;
