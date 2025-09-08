@@ -30,6 +30,81 @@ detect_os() {
     esac
 }
 
+# Find PostgreSQL utilities (pg_config, psql, pg_isready, etc.)
+find_pg_utility() {
+    local utility="$1"
+    local pg_config_path="$2"
+    
+    if [ -z "$pg_config_path" ]; then
+        # If no pg_config path provided, try common locations
+        for pg_path in "/opt/homebrew/bin/$utility" "/usr/local/bin/$utility" "/opt/homebrew/opt/postgresql@14/bin/$utility" "/opt/homebrew/opt/postgresql@15/bin/$utility" "/opt/homebrew/opt/postgresql@16/bin/$utility" "/opt/homebrew/opt/postgresql@17/bin/$utility"; do
+            if [ -x "$pg_path" ]; then
+                echo "$pg_path"
+                return 0
+            fi
+        done
+        
+        # Try which command as fallback
+        if command -v "$utility" >/dev/null 2>&1; then
+            command -v "$utility"
+            return 0
+        fi
+    else
+        # Use pg_config location to find other utilities
+        local pg_bin_dir="$(dirname "$pg_config_path")"
+        local pg_util_path="$pg_bin_dir/$utility"
+        
+        if [ -x "$pg_util_path" ]; then
+            echo "$pg_util_path"
+            return 0
+        fi
+    fi
+    
+    return 1
+}
+
+# Check if PostgreSQL is ready to accept connections
+check_pg_ready() {
+    local max_attempts=30
+    local attempt=1
+    
+    log "Checking if PostgreSQL is ready..."
+    
+    while [ $attempt -le $max_attempts ]; do
+        if [ -n "$PG_ISREADY" ] && [ -x "$PG_ISREADY" ]; then
+            if "$PG_ISREADY" -q; then
+                ok "PostgreSQL is ready (attempt $attempt/$max_attempts)"
+                return 0
+            fi
+        elif command -v pg_isready >/dev/null 2>&1; then
+            if pg_isready -q; then
+                ok "PostgreSQL is ready (attempt $attempt/$max_attempts)"
+                return 0
+            fi
+        else
+            # Fallback: try to connect with psql
+            if [ -n "$PG_PSQL" ] && [ -x "$PG_PSQL" ]; then
+                if "$PG_PSQL" -c "SELECT 1;" >/dev/null 2>&1; then
+                    ok "PostgreSQL is ready (attempt $attempt/$max_attempts)"
+                    return 0
+                fi
+            elif command -v psql >/dev/null 2>&1; then
+                if psql -c "SELECT 1;" >/dev/null 2>&1; then
+                    ok "PostgreSQL is ready (attempt $attempt/$max_attempts)"
+                    return 0
+                fi
+            fi
+        fi
+        
+        log "PostgreSQL not ready yet, waiting... (attempt $attempt/$max_attempts)"
+        sleep 2
+        attempt=$((attempt + 1))
+    done
+    
+    err "PostgreSQL is not ready after $max_attempts attempts"
+    return 1
+}
+
 show_regression_diffs() {
     if [ -f regression.diffs ]; then
         echo
@@ -127,18 +202,37 @@ run_make() {
              export LDFLAGS="-L${PG_ROOT}/lib ${LDFLAGS:-}"
              export CPPFLAGS="-I${PG_ROOT}/include ${CPPFLAGS:-}"
              
+             # Find other PostgreSQL utilities
+             PG_PSQL="$(find_pg_utility "psql" "$PG_CONFIG")"
+             PG_ISREADY="$(find_pg_utility "pg_isready" "$PG_CONFIG")"
+             PG_CREATEDB="$(find_pg_utility "createdb" "$PG_CONFIG")"
+             
+             # Export utility paths for use in make commands
+             if [ -n "$PG_PSQL" ]; then
+                 export PG_PSQL="$PG_PSQL"
+             fi
+             if [ -n "$PG_ISREADY" ]; then
+                 export PG_ISREADY="$PG_ISREADY"
+             fi
+             if [ -n "$PG_CREATEDB" ]; then
+                 export PG_CREATEDB="$PG_CREATEDB"
+             fi
+             
              # Debug: Show PostgreSQL environment
              log "PostgreSQL environment:"
              log "  PG_CONFIG: ${PG_CONFIG}"
              log "  PG_ROOT: ${PG_ROOT}"
+             log "  PG_PSQL: ${PG_PSQL:-not found}"
+             log "  PG_ISREADY: ${PG_ISREADY:-not found}"
+             log "  PG_CREATEDB: ${PG_CREATEDB:-not found}"
              log "  PATH: ${PATH}"
              log "  PKG_CONFIG_PATH: ${PKG_CONFIG_PATH}"
 
             if [ "$target" = "install" ]; then
                 if [ -n "$extra" ]; then
-                    cmd_arr=( sudo -E env PG_CONFIG="$PG_CONFIG" PKG_CONFIG_PATH="$PKG_CONFIG_PATH" LDFLAGS="$LDFLAGS" CPPFLAGS="$CPPFLAGS" make $extra $target )
+                    cmd_arr=( sudo -E env PG_CONFIG="$PG_CONFIG" PKG_CONFIG_PATH="$PKG_CONFIG_PATH" LDFLAGS="$LDFLAGS" CPPFLAGS="$CPPFLAGS" PG_PSQL="${PG_PSQL:-}" PG_ISREADY="${PG_ISREADY:-}" PG_CREATEDB="${PG_CREATEDB:-}" make $extra $target )
                 else
-                    cmd_arr=( sudo -E env PG_CONFIG="$PG_CONFIG" PKG_CONFIG_PATH="$PKG_CONFIG_PATH" LDFLAGS="$LDFLAGS" CPPFLAGS="$CPPFLAGS" make $target )
+                    cmd_arr=( sudo -E env PG_CONFIG="$PG_CONFIG" PKG_CONFIG_PATH="$PKG_CONFIG_PATH" LDFLAGS="$LDFLAGS" CPPFLAGS="$CPPFLAGS" PG_PSQL="${PG_PSQL:-}" PG_ISREADY="${PG_ISREADY:-}" PG_CREATEDB="${PG_CREATEDB:-}" make $target )
                 fi
             else
                 if [ -n "$extra" ]; then
@@ -233,6 +327,11 @@ main() {
         exit 2
     fi
 
+    # Check if PostgreSQL is ready before running tests
+    if [ "$OS" = "macos" ]; then
+        check_pg_ready
+    fi
+    
     log "Running tests (make installcheck)..."
     # If extra is empty, default to PGUSER=postgres for installcheck
     local ic_extra="${extra:-PGUSER=postgres}"
