@@ -272,6 +272,16 @@ EOF
                         choco install visualstudio2019buildtools --package-parameters "--add Microsoft.VisualStudio.Workload.VCTools --includeRecommended --includeOptional" -y || true
                         # Refresh PATH after installation
                         export PATH="/c/Program Files (x86)/Microsoft Visual Studio/2019/BuildTools/VC/Tools/MSVC/*/bin/Hostx64/x64:$PATH"
+                        
+                        # Check again for nmake after installation
+                        log "Checking for nmake after installation..."
+                        for nmake_path in "/c/Program Files (x86)/Microsoft Visual Studio/2019/BuildTools/VC/Tools/MSVC/*/bin/Hostx64/x64/nmake.exe"; do
+                            if ls $nmake_path >/dev/null 2>&1; then
+                                export PATH="$(dirname $(ls $nmake_path | head -1)):$PATH"
+                                log "Found nmake after installation at: $(ls $nmake_path | head -1)"
+                                break
+                            fi
+                        done
                     else
                         log "Chocolatey not available. Cannot install nmake automatically."
                     fi
@@ -288,6 +298,9 @@ EOF
             # Try mingw32-make with environment variables
             elif command -v mingw32-make >/dev/null 2>&1; then
                 log "Using mingw32-make with environment variables"
+                # Get the full path to mingw32-make before modifying PATH
+                MINGW_MAKE_PATH=$(command -v mingw32-make)
+                log "Found mingw32-make at: ${MINGW_MAKE_PATH}"
                 # Export environment variables for the make process
                 export PG_CONFIG
                 export PKG_CONFIG_PATH
@@ -298,9 +311,9 @@ EOF
                 log "Final PATH for make: ${PATH}"
                 log "Windows PATH for mingw32-make: ${PATH_WIN_FULL}"
                 if [ -n "$extra" ]; then
-                    cmd_arr=( env PATH="$PATH_WIN_FULL" mingw32-make $extra $target )
+                    cmd_arr=( env PATH="$PATH_WIN_FULL" "$MINGW_MAKE_PATH" $extra $target )
                 else
-                    cmd_arr=( env PATH="$PATH_WIN_FULL" mingw32-make $target )
+                    cmd_arr=( env PATH="$PATH_WIN_FULL" "$MINGW_MAKE_PATH" $target )
                 fi
             # Try to find mingw32-make in common locations
             elif [ -f "mingw32-make.exe" ] || find . -name "mingw32-make.exe" -type f >/dev/null 2>&1; then
