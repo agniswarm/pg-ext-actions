@@ -76,6 +76,139 @@ find_pg_utility() {
     return 1
 }
 
+# Windows-specific tool detection functions
+detect_windows_build_tools() {
+    local found_tool=""
+    local tool_path=""
+    local tool_dir=""
+    
+    log "Detecting Windows build tools..."
+    
+    # 1. Check for nmake.exe (highest priority)
+    log "Checking for nmake.exe..."
+    
+    # First try vswhere.exe to find Visual Studio installations
+    local vswhere_path="/c/Program Files (x86)/Microsoft Visual Studio/Installer/vswhere.exe"
+    if [ -x "$vswhere_path" ]; then
+        log "Using vswhere.exe to locate nmake..."
+        local nmake_paths
+        nmake_paths=$(powershell -Command "& '$vswhere_path' -latest -products * -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -find '**\\nmake.exe'" 2>/dev/null)
+        
+        if [ -n "$nmake_paths" ]; then
+            # Take the first result
+            tool_path=$(echo "$nmake_paths" | head -1)
+            if [ -x "$tool_path" ]; then
+                found_tool="nmake"
+                tool_dir="$(dirname "$tool_path")"
+                log "Found nmake via vswhere: $tool_path"
+            fi
+        fi
+    fi
+    
+    # If vswhere didn't find it, try common locations
+    if [ -z "$found_tool" ]; then
+        for nmake_pattern in \
+            "/c/Program Files (x86)/Microsoft Visual Studio/2019/BuildTools/VC/Tools/MSVC/*/bin/Hostx64/x64/nmake.exe" \
+            "/c/Program Files (x86)/Microsoft Visual Studio/2022/BuildTools/VC/Tools/MSVC/*/bin/Hostx64/x64/nmake.exe" \
+            "/c/Program Files/Microsoft Visual Studio/2019/Professional/VC/Tools/MSVC/*/bin/Hostx64/x64/nmake.exe" \
+            "/c/Program Files/Microsoft Visual Studio/2022/Professional/VC/Tools/MSVC/*/bin/Hostx64/x64/nmake.exe"; do
+            
+            if ls $nmake_pattern >/dev/null 2>&1; then
+                tool_path=$(ls $nmake_pattern | head -1)
+                if [ -x "$tool_path" ]; then
+                    found_tool="nmake"
+                    tool_dir="$(dirname "$tool_path")"
+                    log "Found nmake in common location: $tool_path"
+                    break
+                fi
+            fi
+        done
+    fi
+    
+    # Try command -v as fallback
+    if [ -z "$found_tool" ] && command -v nmake >/dev/null 2>&1; then
+        tool_path=$(command -v nmake)
+        found_tool="nmake"
+        tool_dir="$(dirname "$tool_path")"
+        log "Found nmake via command -v: $tool_path"
+    fi
+    
+    # 2. Check for mingw32-make.exe (second priority)
+    if [ -z "$found_tool" ]; then
+        log "Checking for mingw32-make.exe..."
+        
+        for mingw_pattern in \
+            "/c/msys64/mingw64/bin/mingw32-make.exe" \
+            "/c/msys64/usr/bin/mingw32-make.exe" \
+            "/c/tools/msys64/mingw64/bin/mingw32-make.exe"; do
+            
+            if [ -x "$mingw_pattern" ]; then
+                tool_path="$mingw_pattern"
+                found_tool="mingw32-make"
+                tool_dir="$(dirname "$tool_path")"
+                log "Found mingw32-make: $tool_path"
+                break
+            fi
+        done
+        
+        # Try command -v as fallback
+        if [ -z "$found_tool" ] && command -v mingw32-make >/dev/null 2>&1; then
+            tool_path=$(command -v mingw32-make)
+            found_tool="mingw32-make"
+            tool_dir="$(dirname "$tool_path")"
+            log "Found mingw32-make via command -v: $tool_path"
+        fi
+    fi
+    
+    # 3. Check for make.exe (fallback)
+    if [ -z "$found_tool" ]; then
+        log "Checking for make.exe..."
+        
+        for make_pattern in \
+            "/c/Program Files/Git/usr/bin/make.exe" \
+            "/c/msys64/usr/bin/make.exe"; do
+            
+            if [ -x "$make_pattern" ]; then
+                tool_path="$make_pattern"
+                found_tool="make"
+                tool_dir="$(dirname "$tool_path")"
+                log "Found make: $tool_path"
+                break
+            fi
+        done
+        
+        # Try command -v as fallback
+        if [ -z "$found_tool" ] && command -v make >/dev/null 2>&1; then
+            tool_path=$(command -v make)
+            found_tool="make"
+            tool_dir="$(dirname "$tool_path")"
+            log "Found make via command -v: $tool_path"
+        fi
+    fi
+    
+    if [ -n "$found_tool" ]; then
+        log "Selected build tool: $found_tool at $tool_path"
+        
+        # Add tool directory to PATH if not already there
+        if [ -n "$tool_dir" ] && [[ ":$PATH:" != *":$tool_dir:"* ]]; then
+            export PATH="$tool_dir:$PATH"
+            log "Added $tool_dir to PATH"
+            
+            # Also add to GITHUB_PATH for persistence
+            if [ -n "$GITHUB_PATH" ]; then
+                echo "$tool_dir" >> "$GITHUB_PATH"
+                log "Added $tool_dir to GITHUB_PATH"
+            fi
+        fi
+        
+        echo "$found_tool|$tool_path"
+        return 0
+    else
+        err "No build tools found (nmake, mingw32-make, or make)"
+        return 1
+    fi
+}
+
 # Check if PostgreSQL is ready to accept connections
 check_pg_ready() {
     local max_attempts=30
@@ -153,8 +286,18 @@ run_make() {
 
     case "$OS" in
         windows)
-            # Set up PostgreSQL environment for Windows (will be updated after finding pg_config)
-            export PATH="$PATH"
+            # Detect and set up build tools
+            local build_tool_info
+            if ! build_tool_info=$(detect_windows_build_tools); then
+                err "Failed to detect any build tools on Windows"
+                exit 1
+            fi
+            
+            # Parse tool info (tool_name|tool_path)
+            local build_tool="${build_tool_info%|*}"
+            local build_tool_path="${build_tool_info#*|}"
+            
+            log "Using build tool: $build_tool at $build_tool_path"
             
             # Find PostgreSQL installation dynamically
             PG_CONFIG_FOUND=""
@@ -188,48 +331,13 @@ run_make() {
             # If still not found, error out
             if [ -z "$PG_CONFIG_FOUND" ]; then
                 err "pg_config not found. PostgreSQL development packages may not be installed."
-                err "Please ensure PostgreSQL is installed via Chocolatey: choco install postgresql<version>"
+                err "Please ensure PostgreSQL is installed via pg-setup action first"
                 exit 1
             fi
             
             # Set additional PostgreSQL environment variables
             PG_CONFIG_DIR="$(dirname "$PG_CONFIG")"
             PG_ROOT="$(dirname "$PG_CONFIG_DIR")"
-            
-            # Convert Unix-style paths to Windows-style for Windows make tools
-            PG_CONFIG_DIR_WIN=$(echo "$PG_CONFIG_DIR" | sed 's|^/c/|C:/|' | sed 's|/|\\|g')
-            PG_ROOT_WIN=$(echo "$PG_ROOT" | sed 's|^/c/|C:/|' | sed 's|/|\\|g')
-            
-            # Add PostgreSQL bin directory to PATH (ensure it's first)
-            export PATH="${PG_CONFIG_DIR}:${PATH}"
-            
-            # Set Windows-style PATH for make tools (this will be used by mingw32-make)
-            export PATH_WIN="${PG_CONFIG_DIR_WIN};${PATH_WIN:-}"
-            
-            # Also set the regular PATH to Windows format for mingw32-make
-            # Convert the entire PATH to Windows format
-            PATH_WIN_FULL=$(echo "$PATH" | sed 's|^/c/|C:/|g' | sed 's|/|\\|g' | sed 's|:|;|g')
-            export PATH_WIN_FULL
-            
-            # Create a wrapper script for pg_config in the current directory
-            # This ensures mingw32-make can find pg_config even if PATH issues persist
-            cat > pg_config_wrapper.sh << 'EOF'
-#!/bin/bash
-# Wrapper script for pg_config
-exec "$PG_CONFIG" "$@"
-EOF
-            chmod +x pg_config_wrapper.sh
-            # Add current directory to PATH so the wrapper is found
-            export PATH=".:${PATH}"
-            
-            # Verify pg_config is accessible
-            if ! command -v pg_config >/dev/null 2>&1; then
-                log "Warning: pg_config not found in PATH after setup"
-                log "PATH: ${PATH}"
-                log "PG_CONFIG_DIR: ${PG_CONFIG_DIR}"
-            else
-                log "pg_config found at: $(command -v pg_config)"
-            fi
             
             export PKG_CONFIG_PATH="${PG_ROOT}/lib/pkgconfig:${PKG_CONFIG_PATH:-}"
             export LDFLAGS="-L${PG_ROOT}/lib ${LDFLAGS:-}"
@@ -242,121 +350,51 @@ EOF
             log "  PATH: ${PATH}"
             log "  PKG_CONFIG_PATH: ${PKG_CONFIG_PATH}"
             
-            # Try different build methods in order of preference
-            # First try nmake with Makefile.win (preferred for Windows)
-            log "Checking for nmake and Makefile.win..."
-            log "Makefile.win exists: $([ -f "Makefile.win" ] && echo "YES" || echo "NO")"
-            log "nmake available: $(command -v nmake >/dev/null 2>&1 && echo "YES" || echo "NO")"
-            
-            # If Makefile.win exists but nmake is not available, try to find or install it
-            if [ -f "Makefile.win" ] && ! command -v nmake >/dev/null 2>&1; then
-                log "Makefile.win found but nmake not available. Looking for nmake in common locations..."
-                # Look for nmake in Visual Studio Build Tools locations
-                for nmake_path in "/c/Program Files (x86)/Microsoft Visual Studio/2019/BuildTools/VC/Tools/MSVC/*/bin/Hostx64/x64/nmake.exe" \
-                                "/c/Program Files (x86)/Microsoft Visual Studio/2022/BuildTools/VC/Tools/MSVC/*/bin/Hostx64/x64/nmake.exe" \
-                                "/c/Program Files/Microsoft Visual Studio/2019/Professional/VC/Tools/MSVC/*/bin/Hostx64/x64/nmake.exe" \
-                                "/c/Program Files/Microsoft Visual Studio/2022/Professional/VC/Tools/MSVC/*/bin/Hostx64/x64/nmake.exe"; do
-                    if ls $nmake_path >/dev/null 2>&1; then
-                        export PATH="$(dirname $(ls $nmake_path | head -1)):$PATH"
-                        log "Found nmake at: $(ls $nmake_path | head -1)"
-                        break
-                    fi
-                done
-                
-                # If still not found, try to install Visual Studio Build Tools
-                if ! command -v nmake >/dev/null 2>&1; then
-                    log "nmake not found in common locations. Attempting to install Visual Studio Build Tools..."
-                    # Try to install Visual Studio Build Tools via Chocolatey
-                    if command -v choco >/dev/null 2>&1; then
-                        log "Installing Visual Studio Build Tools via Chocolatey..."
-                        choco install visualstudio2019buildtools --package-parameters "--add Microsoft.VisualStudio.Workload.VCTools --includeRecommended --includeOptional" -y || true
-                        # Refresh PATH after installation
-                        export PATH="/c/Program Files (x86)/Microsoft Visual Studio/2019/BuildTools/VC/Tools/MSVC/*/bin/Hostx64/x64:$PATH"
-                        
-                        # Check again for nmake after installation
-                        log "Checking for nmake after installation..."
-                        for nmake_path in "/c/Program Files (x86)/Microsoft Visual Studio/2019/BuildTools/VC/Tools/MSVC/*/bin/Hostx64/x64/nmake.exe"; do
-                            if ls $nmake_path >/dev/null 2>&1; then
-                                export PATH="$(dirname $(ls $nmake_path | head -1)):$PATH"
-                                log "Found nmake after installation at: $(ls $nmake_path | head -1)"
-                                break
-                            fi
-                        done
+            # Choose build method based on detected tool
+            case "$build_tool" in
+                "nmake")
+                    if [ -f "Makefile.win" ]; then
+                        log "Using nmake with Makefile.win"
+                        # Export PGXS environment variable for nmake
+                        if [ -n "$PGXS" ]; then
+                            log "Using PGXS: $PGXS"
+                            export PGXS
+                        else
+                            log "Warning: PGXS not set, nmake may not find pgxs.mk"
+                        fi
+                        if [ -n "$extra" ]; then
+                            cmd_arr=( nmake /NOLOGO /F Makefile.win $extra $target )
+                        else
+                            cmd_arr=( nmake /NOLOGO /F Makefile.win $target )
+                        fi
                     else
-                        log "Chocolatey not available. Cannot install nmake automatically."
+                        log "Makefile.win not found, falling back to regular make with nmake"
+                        if [ -n "$extra" ]; then
+                            cmd_arr=( "$build_tool_path" $extra $target )
+                        else
+                            cmd_arr=( "$build_tool_path" $target )
+                        fi
                     fi
-                fi
-            fi
-            
-            if [ -f "Makefile.win" ] && command -v nmake >/dev/null 2>&1; then
-                log "Using nmake with Makefile.win"
-                # Export PGXS environment variable for nmake
-                if [ -n "$PGXS" ]; then
-                    log "Using PGXS: $PGXS"
-                    export PGXS
-                else
-                    log "Warning: PGXS not set, nmake may not find pgxs.mk"
-                fi
-                if [ -n "$extra" ]; then
-                    cmd_arr=( nmake /NOLOGO /F Makefile.win $extra $target )
-                else
-                    cmd_arr=( nmake /NOLOGO /F Makefile.win $target )
-                fi
-            # Try mingw32-make with environment variables
-            elif command -v mingw32-make >/dev/null 2>&1; then
-                log "Using mingw32-make with environment variables"
-                # Get the full path to mingw32-make before modifying PATH
-                MINGW_MAKE_PATH=$(command -v mingw32-make)
-                log "Found mingw32-make at: ${MINGW_MAKE_PATH}"
-                # Export environment variables for the make process
-                export PG_CONFIG
-                export PKG_CONFIG_PATH
-                export LDFLAGS
-                export CPPFLAGS
-                # Set Windows-style PATH for mingw32-make
-                export PATH_WIN_FULL
-                log "Final PATH for make: ${PATH}"
-                log "Windows PATH for mingw32-make: ${PATH_WIN_FULL}"
-                if [ -n "$extra" ]; then
-                    cmd_arr=( env PATH="$PATH_WIN_FULL" "$MINGW_MAKE_PATH" $extra $target )
-                else
-                    cmd_arr=( env PATH="$PATH_WIN_FULL" "$MINGW_MAKE_PATH" $target )
-                fi
-            # Try to find mingw32-make in common locations
-            elif [ -f "mingw32-make.exe" ] || find . -name "mingw32-make.exe" -type f >/dev/null 2>&1; then
-                log "Found mingw32-make.exe in current directory or subdirectories"
-                MINGW_MAKE_PATH=$(find . -name "mingw32-make.exe" -type f | head -1)
-                log "Using mingw32-make at: ${MINGW_MAKE_PATH}"
-                # Export environment variables for the make process
-                export PG_CONFIG
-                export PKG_CONFIG_PATH
-                export LDFLAGS
-                export CPPFLAGS
-                # Set Windows-style PATH for mingw32-make
-                export PATH_WIN_FULL
-                if [ -n "$extra" ]; then
-                    cmd_arr=( env PATH="$PATH_WIN_FULL" "$MINGW_MAKE_PATH" $extra $target )
-                else
-                    cmd_arr=( env PATH="$PATH_WIN_FULL" "$MINGW_MAKE_PATH" $target )
-                fi
-            # Try regular make as fallback
-            else
-                log "Using make as fallback"
-                # Export environment variables for the make process
-                export PG_CONFIG
-                export PKG_CONFIG_PATH
-                export LDFLAGS
-                export CPPFLAGS
-                # Set Windows-style PATH for make
-                export PATH_WIN_FULL
-                log "Final PATH for make: ${PATH}"
-                log "Windows PATH for make: ${PATH_WIN_FULL}"
-                if [ -n "$extra" ]; then
-                    cmd_arr=( env PATH="$PATH_WIN_FULL" make $extra $target )
-                else
-                    cmd_arr=( env PATH="$PATH_WIN_FULL" make $target )
-                fi
-            fi
+                    ;;
+                "mingw32-make"|"make")
+                    log "Using $build_tool with environment variables"
+                    # Export environment variables for the make process
+                    export PG_CONFIG
+                    export PKG_CONFIG_PATH
+                    export LDFLAGS
+                    export CPPFLAGS
+                    
+                    if [ -n "$extra" ]; then
+                        cmd_arr=( "$build_tool_path" $extra $target )
+                    else
+                        cmd_arr=( "$build_tool_path" $target )
+                    fi
+                    ;;
+                *)
+                    err "Unknown build tool: $build_tool"
+                    exit 1
+                    ;;
+            esac
             ;;
          macos)
              # Set up PostgreSQL development environment
