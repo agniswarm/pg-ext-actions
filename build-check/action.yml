@@ -40,8 +40,17 @@ runs:
               exit 1
             fi
             ;;
+          Darwin*)
+            # macOS - check for .dylib files
+            if find . -maxdepth 1 -name "*.dylib" | grep -q .; then
+              echo "Extension built successfully on macOS"
+            else
+              echo "Extension build may have failed on macOS"
+              exit 1
+            fi
+            ;;
           *)
-            # Unix-like systems
+            # Linux and other Unix-like systems - check for .so files
             if find . -maxdepth 1 -name "*.so" | grep -q .; then
               echo "Extension built successfully"
             else
