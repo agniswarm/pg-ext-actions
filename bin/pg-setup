@@ -166,6 +166,50 @@ install_postgresql_macos() {
     esac
 }
 
+# Check if PostgreSQL is running and accepting connections
+check_postgresql_running() {
+    local pg_bin="$1"
+    local max_attempts=10
+    local attempt=1
+    
+    echo "Checking if PostgreSQL is running and accepting connections..."
+    
+    while [ $attempt -le $max_attempts ]; do
+        echo "Attempt $attempt/$max_attempts: Checking PostgreSQL status..."
+        
+        if [ -x "$pg_bin/pg_isready.exe" ]; then
+            if "$pg_bin/pg_isready.exe" -h localhost -p 5432 >/dev/null 2>&1; then
+                echo "PostgreSQL is running and accepting connections"
+                return 0
+            else
+                echo "PostgreSQL not ready yet (attempt $attempt)"
+            fi
+        else
+            # Fallback: try to connect with psql
+            if [ -x "$pg_bin/psql.exe" ]; then
+                if echo "SELECT 1;" | "$pg_bin/psql.exe" -h localhost -p 5432 -d postgres >/dev/null 2>&1; then
+                    echo "PostgreSQL is running and accepting connections"
+                    return 0
+                else
+                    echo "PostgreSQL not ready yet (attempt $attempt)"
+                fi
+            else
+                echo "Warning: Neither pg_isready nor psql available for connection test"
+                return 1
+            fi
+        fi
+        
+        if [ $attempt -lt $max_attempts ]; then
+            echo "Waiting 3 seconds before next attempt..."
+            sleep 3
+        fi
+        attempt=$((attempt + 1))
+    done
+    
+    echo "PostgreSQL is not running or not accepting connections after $max_attempts attempts"
+    return 1
+}
+
 # Install PGXS from PostgreSQL source when not available
 install_pgxs_from_source() {
     local version="$1"
@@ -379,19 +423,61 @@ install_postgresql_windows() {
         "$pf_bin/initdb.exe" -D "$pf_root/data" || true
     fi
     
-    # Start PostgreSQL service (try different service name patterns)
-    echo "Starting PostgreSQL service..."
-    net start "postgresql-x64-$version" >/dev/null 2>&1 || true
-    net start "postgresql-$version" >/dev/null 2>&1 || true
-    net start postgresql >/dev/null 2>&1 || true
-    
-    # Wait for service to start
-    sleep 3
+        # Start PostgreSQL service (try different service name patterns)
+        echo "Starting PostgreSQL service..."
+        local service_started=false
+        
+        # First, check what PostgreSQL services are available
+        echo "Checking for available PostgreSQL services..."
+        sc query | grep -i postgresql || echo "No PostgreSQL services found in service list"
+        
+        # Try different service name patterns
+        for service_name in "postgresql-x64-$version" "postgresql-$version" "postgresql"; do
+            echo "Trying to start service: $service_name"
+            if net start "$service_name" >/dev/null 2>&1; then
+                echo "Successfully started service: $service_name"
+                service_started=true
+                break
+            else
+                echo "Failed to start service: $service_name"
+                # Get more details about why it failed
+                sc query "$service_name" 2>/dev/null || echo "Service $service_name not found"
+            fi
+        done
+        
+        # If no service started, try to start PostgreSQL manually
+        if [ "$service_started" = "false" ]; then
+            echo "No PostgreSQL service found, attempting to start PostgreSQL manually..."
+            if [ -x "$pf_bin/postgres.exe" ]; then
+                echo "Starting PostgreSQL in background..."
+                "$pf_bin/postgres.exe" -D "$pf_root/data" >/dev/null 2>&1 &
+                sleep 5
+                service_started=true
+            else
+                echo "Warning: postgres.exe not found, cannot start PostgreSQL manually"
+            fi
+        fi
+        
+        # Wait for service to start
+        sleep 3
+        
+        # Check if PostgreSQL is actually running
+        if [ "$service_started" = "true" ]; then
+            if check_postgresql_running "$pf_bin"; then
+                echo "PostgreSQL is ready for connections"
+            else
+                echo "Warning: PostgreSQL service started but not accepting connections"
+                echo "This may cause database creation to fail"
+            fi
+        else
+            echo "Warning: Could not start PostgreSQL service"
+            echo "Database creation may fail"
+        fi
     
     # Create database
     if [[ -x "$pf_bin/createdb.exe" ]]; then
         echo "Creating postgres database..."
-        "$pf_bin/createdb.exe" postgres || true
+        "$pf_bin/createdb.exe" postgres
     fi
     
     # Install contrib if needed
