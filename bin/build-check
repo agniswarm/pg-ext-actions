@@ -253,9 +253,9 @@ EOF
                 log "Makefile.win found but nmake not available. Looking for nmake in common locations..."
                 # Look for nmake in Visual Studio Build Tools locations
                 for nmake_path in "/c/Program Files (x86)/Microsoft Visual Studio/2019/BuildTools/VC/Tools/MSVC/*/bin/Hostx64/x64/nmake.exe" \
-                                 "/c/Program Files (x86)/Microsoft Visual Studio/2022/BuildTools/VC/Tools/MSVC/*/bin/Hostx64/x64/nmake.exe" \
-                                 "/c/Program Files/Microsoft Visual Studio/2019/Professional/VC/Tools/MSVC/*/bin/Hostx64/x64/nmake.exe" \
-                                 "/c/Program Files/Microsoft Visual Studio/2022/Professional/VC/Tools/MSVC/*/bin/Hostx64/x64/nmake.exe"; do
+                                "/c/Program Files (x86)/Microsoft Visual Studio/2022/BuildTools/VC/Tools/MSVC/*/bin/Hostx64/x64/nmake.exe" \
+                                "/c/Program Files/Microsoft Visual Studio/2019/Professional/VC/Tools/MSVC/*/bin/Hostx64/x64/nmake.exe" \
+                                "/c/Program Files/Microsoft Visual Studio/2022/Professional/VC/Tools/MSVC/*/bin/Hostx64/x64/nmake.exe"; do
                     if ls $nmake_path >/dev/null 2>&1; then
                         export PATH="$(dirname $(ls $nmake_path | head -1)):$PATH"
                         log "Found nmake at: $(ls $nmake_path | head -1)"
