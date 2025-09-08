@@ -3,12 +3,13 @@
 # Robust cross-platform build / install / installcheck wrapper for PostgreSQL extensions.
 #
 # Usage:
-#   test/bin/build-check [EXTRA_MAKE_VARS]
+#   test/bin/build-check [OPERATING_SYSTEM] [EXTRA_MAKE_VARS]
 # Example:
-#   test/bin/build-check "PGUSER=postgres"
+#   test/bin/build-check "linux" "PGUSER=postgres"
+#   test/bin/build-check "macos"
 #
 # Behavior:
-# - Detects OS (linux|macos|windows).
+# - Uses specified OS or auto-detects (linux|macos|windows).
 # - Runs: make -> make install -> make installcheck (with EXTRA_MAKE_VARS).
 # - On failure prints regression.diffs (if present) and exits non-zero.
 # - On success exits 0 and prints success messages only.
@@ -60,11 +61,9 @@ run_cmd() {
 run_make() {
     local target="${1:-}"    # may be empty
     local extra="${2:-}"     # may be empty
-    local os
-    os="$(detect_os)"
     local cmd_arr
 
-    case "$os" in
+    case "$OS" in
         windows)
             if [ -f "Makefile.win" ] && command -v nmake >/dev/null 2>&1; then
                 if [ -n "$extra" ]; then
@@ -160,10 +159,43 @@ run_make() {
 }
 
 main() {
-    local extra="${1:-}"   # optional extra make vars (e.g. "PGUSER=postgres")
+    local os_input="${1:-}"     # optional operating system (linux, macos, windows)
+    local extra="${2:-}"        # optional extra make vars (e.g. "PGUSER=postgres")
     local rc=0
 
-    log "Detected OS: $(detect_os)"
+    # Parse OS and version from input
+    parse_os() {
+        local input="$1"
+        
+        # Check for specific OS versions
+        case "$input" in
+            ubuntu-*|debian-*|centos-*|rhel-*|fedora-*|suse-*|alpine-*)
+                echo "linux"
+                ;;
+            macos-*|darwin-*)
+                echo "macos"
+                ;;
+            windows-*|win-*)
+                echo "windows"
+                ;;
+            linux|macos|windows)
+                echo "$input"
+                ;;
+            *)
+                # Auto-detect if invalid input provided
+                detect_os
+                ;;
+        esac
+    }
+
+    OS=$(parse_os "$os_input")
+    OS_VERSION="$os_input"
+
+    if [[ "$os_input" == "linux" || "$os_input" == "macos" || "$os_input" == "windows" ]]; then
+        log "Using specified operating system: $OS"
+    else
+        log "Using specified operating system: $OS (version: $OS_VERSION)"
+    fi
     log "Starting build (make)..."
     if ! run_make "" "$extra"; then
         err "Build step failed"

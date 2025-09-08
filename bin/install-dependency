@@ -8,17 +8,50 @@ if [[ -n ${AUTH_TOKEN} ]]; then
     prefix="${AUTH_TOKEN}:x-oauth-basic@"
 fi
 
-# Detect operating system
-detect_os() {
-    case "$(uname -s)" in
-        Linux*)     echo "linux";;
-        Darwin*)    echo "macos";;
-        CYGWIN*|MINGW*|MSYS*) echo "windows";;
-        *)          echo "unknown";;
+# Get operating system from first argument or auto-detect
+OS_INPUT="${1:-linux}"
+
+# Parse OS and version from input
+parse_os() {
+    local input="$1"
+    
+    # Check for specific OS versions
+    case "$input" in
+        ubuntu-*|debian-*|centos-*|rhel-*|fedora-*|suse-*|alpine-*)
+            echo "linux"
+            ;;
+        macos-*|darwin-*)
+            echo "macos"
+            ;;
+        windows-*|win-*)
+            echo "windows"
+            ;;
+        linux|macos|windows)
+            echo "$input"
+            ;;
+        *)
+            # Auto-detect if invalid input provided
+            case "$(uname -s)" in
+                Linux*)     echo "linux";;
+                Darwin*)    echo "macos";;
+                CYGWIN*|MINGW*|MSYS*) echo "windows";;
+                *)          echo "unknown";;
+            esac
+            ;;
     esac
 }
 
-OS=$(detect_os)
+OS=$(parse_os "$OS_INPUT")
+OS_VERSION="$OS_INPUT"
+
+if [[ "$OS_INPUT" == "linux" || "$OS_INPUT" == "macos" || "$OS_INPUT" == "windows" ]]; then
+    echo "Using specified operating system: $OS"
+else
+    echo "Using specified operating system: $OS (version: $OS_VERSION)"
+fi
+
+# Shift to get remaining arguments (repositories)
+shift 2>/dev/null || true
 
 # Function to run make with appropriate permissions
 run_make() {

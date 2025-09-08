@@ -5,29 +5,62 @@ set -ex
 if [[ $# -eq 0 ]]; then
     cat << EOF
 Usage:
-    pg_setup.sh PG_VERSION
+    pg_setup.sh PG_VERSION [OPERATING_SYSTEM]
+    
+Arguments:
+    PG_VERSION: PostgreSQL major version number (required)
+    OPERATING_SYSTEM: Operating system to run on - linux, macos, or windows (optional, defaults to linux)
 EOF
     exit 1
 fi
 
 PG_VERSION=$1
+OS_INPUT=${2:-linux}
 
-# Detect operating system
-detect_os() {
-    case "$(uname -s)" in
-        Linux*)     echo "linux";;
-        Darwin*)    echo "macos";;
-        CYGWIN*|MINGW*|MSYS*) echo "windows";;
-        *)          echo "unknown";;
+# Parse OS and version from input
+parse_os() {
+    local input="$1"
+    
+    # Check for specific OS versions
+    case "$input" in
+        ubuntu-*|debian-*|centos-*|rhel-*|fedora-*|suse-*|alpine-*)
+            echo "linux"
+            ;;
+        macos-*|darwin-*)
+            echo "macos"
+            ;;
+        windows-*|win-*)
+            echo "windows"
+            ;;
+        linux|macos|windows)
+            echo "$input"
+            ;;
+        *)
+            # Auto-detect if invalid input provided
+            case "$(uname -s)" in
+                Linux*)     echo "linux";;
+                Darwin*)    echo "macos";;
+                CYGWIN*|MINGW*|MSYS*) echo "windows";;
+                *)          echo "unknown";;
+            esac
+            ;;
     esac
 }
 
-OS=$(detect_os)
+OS=$(parse_os "$OS_INPUT")
+OS_VERSION="$OS_INPUT"
+
+if [[ "$OS_INPUT" == "linux" || "$OS_INPUT" == "macos" || "$OS_INPUT" == "windows" ]]; then
+    echo "Using specified operating system: $OS"
+else
+    echo "Using specified operating system: $OS (version: $OS_VERSION)"
+fi
 
 # Function to install PostgreSQL on Linux (Ubuntu/Debian)
 install_postgresql_linux() {
     local version=$1
     local contrib=$2
+    local os_version="$3"
     
     # Remove existing postgres instances
     dpkg-query -f '${Package}\n' -W | grep ^postgresql | xargs sudo dpkg --purge || true
@@ -52,12 +85,25 @@ host all all 0/0 trust
 host all all ::0/0 trust
 EOF
     sudo service postgresql reload
+    
+    # OS-specific optimizations
+    case "$os_version" in
+        ubuntu-22.04|ubuntu-24.04)
+            echo "Optimizing for Ubuntu $(echo $os_version | cut -d'-' -f2)"
+            # Ubuntu-specific optimizations can go here
+            ;;
+        debian-*)
+            echo "Optimizing for Debian $(echo $os_version | cut -d'-' -f2)"
+            # Debian-specific optimizations can go here
+            ;;
+    esac
 }
 
 # Function to install PostgreSQL on macOS
 install_postgresql_macos() {
     local version=$1
     local contrib=$2
+    local os_version="$3"
     
     # Check if Homebrew is installed
     if ! command -v brew &> /dev/null; then
@@ -98,12 +144,25 @@ install_postgresql_macos() {
     if [[ $contrib == 'true' ]]; then
         echo "PostgreSQL contrib is included by default on macOS"
     fi
+    
+    # OS-specific optimizations
+    case "$os_version" in
+        macos-12|macos-13|macos-14|macos-15)
+            echo "Optimizing for macOS $(echo $os_version | cut -d'-' -f2)"
+            # macOS version-specific optimizations can go here
+            ;;
+        darwin-*)
+            echo "Optimizing for Darwin $(echo $os_version | cut -d'-' -f2)"
+            # Darwin version-specific optimizations can go here
+            ;;
+    esac
 }
 
 # Function to install PostgreSQL on Windows
 install_postgresql_windows() {
     local version=$1
     local contrib=$2
+    local os_version="$3"
     
     # Check if Chocolatey is installed
     if ! command -v choco &> /dev/null; then
@@ -135,18 +194,30 @@ install_postgresql_windows() {
     if [[ $contrib == 'true' ]]; then
         echo "PostgreSQL contrib is included by default on Windows"
     fi
+    
+    # OS-specific optimizations
+    case "$os_version" in
+        windows-2022|windows-2025|windows-11|windows-10)
+            echo "Optimizing for Windows $(echo $os_version | cut -d'-' -f2)"
+            # Windows version-specific optimizations can go here
+            ;;
+        win-*)
+            echo "Optimizing for Windows $(echo $os_version | cut -d'-' -f2)"
+            # Windows version-specific optimizations can go here
+            ;;
+    esac
 }
 
 # Main installation logic
 case $OS in
     "linux")
-        install_postgresql_linux $PG_VERSION $CONTRIB
+        install_postgresql_linux $PG_VERSION $CONTRIB "$OS_VERSION"
         ;;
     "macos")
-        install_postgresql_macos $PG_VERSION $CONTRIB
+        install_postgresql_macos $PG_VERSION $CONTRIB "$OS_VERSION"
         ;;
     "windows")
-        install_postgresql_windows $PG_VERSION $CONTRIB
+        install_postgresql_windows $PG_VERSION $CONTRIB "$OS_VERSION"
         ;;
     *)
         echo "Unsupported operating system: $OS"

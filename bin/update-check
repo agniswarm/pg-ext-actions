@@ -2,6 +2,48 @@
 
 set -e
 
+# Get operating system from first argument or auto-detect
+OS_INPUT="${1:-linux}"
+
+# Parse OS and version from input
+parse_os() {
+    local input="$1"
+    
+    # Check for specific OS versions
+    case "$input" in
+        ubuntu-*|debian-*|centos-*|rhel-*|fedora-*|suse-*|alpine-*)
+            echo "linux"
+            ;;
+        macos-*|darwin-*)
+            echo "macos"
+            ;;
+        windows-*|win-*)
+            echo "windows"
+            ;;
+        linux|macos|windows)
+            echo "$input"
+            ;;
+        *)
+            # Auto-detect if invalid input provided
+            case "$(uname -s)" in
+                Linux*)     echo "linux";;
+                Darwin*)    echo "macos";;
+                CYGWIN*|MINGW*|MSYS*) echo "windows";;
+                *)          echo "unknown";;
+            esac
+            ;;
+    esac
+}
+
+OS=$(parse_os "$OS_INPUT")
+OS_VERSION="$OS_INPUT"
+
+if [[ "$OS_INPUT" == "linux" || "$OS_INPUT" == "macos" || "$OS_INPUT" == "windows" ]]; then
+    echo "Using specified operating system: $OS"
+else
+    echo "Using specified operating system: $OS (version: $OS_VERSION)"
+fi
+
 control_file=`ls *.control`
 ext_name=`echo ${control_file} | cut -d "." -f 1`
 
@@ -22,18 +64,6 @@ if [[ $main_version == $current_version ]]; then
     echo 'Versions are identical, skipping update check...'
     exit 0
 fi
-
-# Detect operating system for psql command
-detect_os() {
-    case "$(uname -s)" in
-        Linux*)     echo "linux";;
-        Darwin*)    echo "macos";;
-        CYGWIN*|MINGW*|MSYS*) echo "windows";;
-        *)          echo "unknown";;
-    esac
-}
-
-OS=$(detect_os)
 
 # Function to run psql with appropriate parameters
 run_psql() {

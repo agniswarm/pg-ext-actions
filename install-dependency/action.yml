@@ -9,6 +9,9 @@ inputs:
     default: 'github.com'
   auth-token:
     description: 'Authentication token'
+  operating-system:
+    description: 'Operating system and version to run on (e.g., ubuntu-22.04, ubuntu-24.04, macos-12, macos-14, windows-2022, windows-2025, or generic: linux, macos, windows)'
+    default: 'ubuntu-22.04'
 runs:
   using: "composite"
   steps:
@@ -28,7 +31,7 @@ runs:
         chmod +x "$SCRIPT_PATH"
         
         # Run the script
-        "$SCRIPT_PATH" ${{ inputs.repository }}
+        "$SCRIPT_PATH" ${{ inputs.operating-system }} ${{ inputs.repository }}
       shell: bash
       env:
         AUTH_TOKEN: ${{ inputs.auth-token }}

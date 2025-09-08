@@ -7,6 +7,9 @@ inputs:
   install-contrib:
     description: 'Install PostgreSQL contrib package (true/false)'
     default: 'false'
+  operating-system:
+    description: 'Operating system and version to run on (e.g., ubuntu-22.04, ubuntu-24.04, macos-12, macos-14, windows-2022, windows-2025, or generic: linux, macos, windows)'
+    default: 'ubuntu-22.04'
 runs:
   using: "composite"
   steps:
@@ -26,7 +29,7 @@ runs:
         chmod +x "$SCRIPT_PATH"
         
         # Run the script
-        "$SCRIPT_PATH" ${{ inputs.version }}
+        "$SCRIPT_PATH" ${{ inputs.version }} ${{ inputs.operating-system }}
       shell: bash
       env:
         CONTRIB: ${{ inputs.install-contrib }}
