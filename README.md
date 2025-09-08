@@ -89,7 +89,11 @@ Build, install, and test PostgreSQL extensions with comprehensive regression tes
 **Arguments:**
 
 - `working-directory`: Directory to run script in (optional, default: current directory)
-- `operating-system`: Operating system and version to target (optional, default: `'ubuntu-22.04'`)
+- `operating-system`: Operating system and version to target (optional, default: `'ubuntu-24.04'`)
+- `make-tool`: Make tool to use on Windows (optional, default: `'mingw32-make'`)
+  - `mingw32-make`: MinGW make tool (default, works with Makefile.win)
+  - `nmake`: Microsoft Visual Studio nmake (requires Visual Studio Build Tools)
+  - `make`: Generic make tool (fallback)
 
 **What it does:**
 
@@ -100,7 +104,10 @@ Build, install, and test PostgreSQL extensions with comprehensive regression tes
 **Platform-specific behavior:**
 
 - **Linux/macOS**: Uses `make` with `sudo` for installation, validates `pg_config` availability
-- **Windows**: Uses `nmake` (preferred) or `mingw32-make`/`make` without sudo
+- **Windows**: Uses user-specified make tool (default: `mingw32-make`) with `Makefile.win`
+  - `mingw32-make -f Makefile.win` (default)
+  - `nmake /F Makefile.win` (if Visual Studio Build Tools available)
+  - `make` (fallback)
 - **macOS**: Automatically sets up PostgreSQL development environment (Homebrew paths, `PG_CONFIG`, etc.)
 
 ### `install-dependency`
@@ -253,6 +260,33 @@ jobs:
           operating-system: ${{ matrix.target-os }}
 ```
 
+### Windows-Specific Testing with Custom Make Tool
+
+```yaml
+name: Windows Build Test
+
+on:
+  push:
+    branches: ['main']
+
+jobs:
+  test-windows:
+    runs-on: windows-latest
+    steps:
+      # Install PostgreSQL
+      - uses: agniswarm/pg-ext-actions/pg-setup@master
+        with:
+          version: '16'
+          operating-system: 'windows-2022'
+      
+      # Build with specific make tool
+      - uses: actions/checkout@v4
+      - uses: agniswarm/pg-ext-actions/build-check@master
+        with:
+          operating-system: 'windows-2022'
+          make-tool: 'nmake'  # Use Visual Studio nmake instead of default mingw32-make
+```
+
 ### Simple Single-Platform Testing
 
 ```yaml
@@ -266,7 +300,7 @@ jobs:
   test:
     runs-on: ubuntu-latest
     steps:
-      # Install PostgreSQL (uses default ubuntu-22.04)
+      # Install PostgreSQL (uses default ubuntu-24.04)
       - uses: agniswarm/pg-ext-actions/pg-setup@master
         with:
           version: '16'
