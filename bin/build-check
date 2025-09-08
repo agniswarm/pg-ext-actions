@@ -329,8 +329,8 @@ main() {
         exit 2
     fi
 
-    # Check if PostgreSQL is ready before running tests (skip in CI environments)
-    if [ "$OS" = "macos" ] && [ -z "$CI" ] && [ -z "$GITHUB_ACTIONS" ]; then
+    # Check if PostgreSQL is ready before running tests
+    if [ "$OS" = "macos" ]; then
         check_pg_ready
     fi
     
