@@ -105,22 +105,31 @@ detect_windows_build_tools() {
         fi
     fi
     
-    # If vswhere didn't find it, try common locations
+    # If vswhere didn't find it, try common locations more aggressively
     if [ -z "$found_tool" ]; then
-        for nmake_pattern in \
-            "/c/Program Files (x86)/Microsoft Visual Studio/2019/BuildTools/VC/Tools/MSVC/*/bin/Hostx64/x64/nmake.exe" \
-            "/c/Program Files (x86)/Microsoft Visual Studio/2022/BuildTools/VC/Tools/MSVC/*/bin/Hostx64/x64/nmake.exe" \
-            "/c/Program Files/Microsoft Visual Studio/2019/Professional/VC/Tools/MSVC/*/bin/Hostx64/x64/nmake.exe" \
-            "/c/Program Files/Microsoft Visual Studio/2022/Professional/VC/Tools/MSVC/*/bin/Hostx64/x64/nmake.exe"; do
+        log "Searching for nmake in Visual Studio installations..."
+        for vs_base in \
+            "/c/Program Files (x86)/Microsoft Visual Studio" \
+            "/c/Program Files/Microsoft Visual Studio"; do
             
-            if ls $nmake_pattern >/dev/null 2>&1; then
-                tool_path=$(ls $nmake_pattern | head -1)
-                if [ -x "$tool_path" ]; then
-                    found_tool="nmake"
-                    tool_dir="$(dirname "$tool_path")"
-                    log "Found nmake in common location: $tool_path"
-                    break
-                fi
+            if [ -d "$vs_base" ]; then
+                log "Checking Visual Studio installation at: $vs_base"
+                for vs_version in "2019" "2022" "2017"; do
+                    for vs_edition in "BuildTools" "Professional" "Community" "Enterprise"; do
+                        for arch in "Hostx64/x64" "Hostx86/x64"; do
+                            nmake_pattern="$vs_base/$vs_version/$vs_edition/VC/Tools/MSVC/*/bin/$arch/nmake.exe"
+                            if ls $nmake_pattern >/dev/null 2>&1; then
+                                tool_path=$(ls $nmake_pattern | head -1)
+                                if [ -x "$tool_path" ]; then
+                                    found_tool="nmake"
+                                    tool_dir="$(dirname "$tool_path")"
+                                    log "Found nmake in Visual Studio: $tool_path"
+                                    break 4
+                                fi
+                            fi
+                        done
+                    done
+                done
             fi
         done
     fi
@@ -133,7 +142,7 @@ detect_windows_build_tools() {
         log "Found nmake via command -v: $tool_path"
     fi
     
-    # 2. Check for mingw32-make.exe (second priority)
+    # 2. Check for mingw32-make.exe (second priority) - only if nmake not found
     if [ -z "$found_tool" ]; then
         log "Checking for mingw32-make.exe..."
         
@@ -160,7 +169,7 @@ detect_windows_build_tools() {
         fi
     fi
     
-    # 3. Check for make.exe (fallback)
+    # 3. Check for make.exe (fallback) - only if nmake and mingw32-make not found
     if [ -z "$found_tool" ]; then
         log "Checking for make.exe..."
         
@@ -183,6 +192,39 @@ detect_windows_build_tools() {
             found_tool="make"
             tool_dir="$(dirname "$tool_path")"
             log "Found make via command -v: $tool_path"
+        fi
+    fi
+    
+    # 4. If still no tool found, try to install Visual Studio Build Tools for nmake
+    if [ -z "$found_tool" ]; then
+        log "No build tools found. Attempting to install Visual Studio Build Tools for nmake..."
+        
+        # Try to install Visual Studio Build Tools via Chocolatey
+        if command -v choco >/dev/null 2>&1; then
+            log "Installing Visual Studio Build Tools via Chocolatey..."
+            choco install visualstudio2019buildtools --package-parameters "--add Microsoft.VisualStudio.Component.VC.Tools --includeRecommended --includeOptional" -y || true
+            
+            # Wait for installation to complete
+            sleep 10
+            
+            # Check again for nmake after installation
+            log "Checking for nmake after installation..."
+            for nmake_pattern in \
+                "/c/Program Files (x86)/Microsoft Visual Studio/2019/BuildTools/VC/Tools/MSVC/*/bin/Hostx64/x64/nmake.exe" \
+                "/c/Program Files (x86)/Microsoft Visual Studio/2022/BuildTools/VC/Tools/MSVC/*/bin/Hostx64/x64/nmake.exe"; do
+                
+                if ls $nmake_pattern >/dev/null 2>&1; then
+                    tool_path=$(ls $nmake_pattern | head -1)
+                    if [ -x "$tool_path" ]; then
+                        found_tool="nmake"
+                        tool_dir="$(dirname "$tool_path")"
+                        log "Found nmake after installation: $tool_path"
+                        break
+                    fi
+                fi
+            done
+        else
+            log "Chocolatey not available. Cannot install nmake automatically."
         fi
     fi
     
@@ -355,7 +397,7 @@ run_make() {
             case "$build_tool" in
                 "nmake")
                     if [ -f "Makefile.win" ]; then
-                        log "Using nmake with Makefile.win"
+                        log "Using nmake with Makefile.win (preferred for Windows builds)"
                         # Export PGXS environment variable for nmake
                         if [ -n "$PGXS" ]; then
                             log "Using PGXS: $PGXS"
@@ -379,6 +421,9 @@ run_make() {
                     ;;
                 "mingw32-make"|"make")
                     log "Using $build_tool with environment variables"
+                    log "Warning: Your build may require nmake for proper Windows compilation"
+                    log "Consider installing Visual Studio Build Tools if builds fail"
+                    
                     # Export environment variables for the make process
                     export PG_CONFIG
                     export PKG_CONFIG_PATH
