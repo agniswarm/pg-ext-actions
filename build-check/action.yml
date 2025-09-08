@@ -2,7 +2,9 @@ name: 'build-check'
 description: 'Build & install the extension and run regression tests'
 inputs:
   working-directory:
-    description: 'Working directory'
+    description: 'Working directory containing the PostgreSQL extension project (must contain Makefile)'
+    default: '.'
+    required: false
   operating-system:
     description: 'Operating system and version to run on (e.g., ubuntu-22.04, ubuntu-24.04, macos-12, macos-14, windows-2022, windows-2025, or generic: linux, macos, windows)'
     default: 'ubuntu-24.04'
@@ -23,6 +25,16 @@ runs:
         
         # Make sure it's executable
         chmod +x "$SCRIPT_PATH"
+        
+        # Check if we're in a directory with a Makefile
+        if [ ! -f "Makefile" ] && [ ! -f "Makefile.win" ]; then
+          echo "Error: No Makefile or Makefile.win found in current directory"
+          echo "This action must be run from within a PostgreSQL extension project directory"
+          echo "Current directory: $(pwd)"
+          echo "Available files:"
+          ls -la | head -10
+          exit 1
+        fi
         
         # Run the script
         "$SCRIPT_PATH" ${{ inputs.operating-system }}
