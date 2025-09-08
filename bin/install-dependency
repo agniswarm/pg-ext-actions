@@ -72,20 +72,42 @@ run_make() {
             # On macOS, ensure we have the right environment for make
             export PATH="/opt/homebrew/bin:/usr/local/bin:$PATH"
             
-            # Find PostgreSQL installation and set PG_CONFIG
-            if [ -f "/opt/homebrew/bin/pg_config" ]; then
-                export PG_CONFIG="/opt/homebrew/bin/pg_config"
-            elif [ -f "/usr/local/bin/pg_config" ]; then
-                export PG_CONFIG="/usr/local/bin/pg_config"
-            else
+            # Find and set PG_CONFIG - try multiple common locations
+            PG_CONFIG_FOUND=""
+            
+            # Check common Homebrew locations
+            for pg_path in "/opt/homebrew/bin/pg_config" "/usr/local/bin/pg_config" "/opt/homebrew/opt/postgresql@14/bin/pg_config" "/opt/homebrew/opt/postgresql@15/bin/pg_config" "/opt/homebrew/opt/postgresql@16/bin/pg_config" "/opt/homebrew/opt/postgresql@17/bin/pg_config"; do
+                if [ -x "$pg_path" ]; then
+                    export PG_CONFIG="$pg_path"
+                    PG_CONFIG_FOUND="true"
+                    echo "Found pg_config at: $pg_path"
+                    break
+                fi
+            done
+            
+            # If not found in common locations, try which command
+            if [ -z "$PG_CONFIG_FOUND" ]; then
+                if command -v pg_config >/dev/null 2>&1; then
+                    export PG_CONFIG="$(command -v pg_config)"
+                    PG_CONFIG_FOUND="true"
+                    echo "Found pg_config via which: $PG_CONFIG"
+                fi
+            fi
+            
+            # If still not found, error out
+            if [ -z "$PG_CONFIG_FOUND" ]; then
                 echo "Error: pg_config not found. PostgreSQL development packages may not be installed."
+                echo "Searched locations: /opt/homebrew/bin, /usr/local/bin, and common PostgreSQL version paths"
                 exit 1
             fi
             
-            # Set additional PostgreSQL environment variables
-            export PKG_CONFIG_PATH="/opt/homebrew/lib/pkgconfig:/usr/local/lib/pkgconfig:$PKG_CONFIG_PATH"
-            export LDFLAGS="-L/opt/homebrew/lib -L/usr/local/lib $LDFLAGS"
-            export CPPFLAGS="-I/opt/homebrew/include -I/usr/local/include $CPPFLAGS"
+            # Set additional PostgreSQL environment variables based on PG_CONFIG location
+            PG_CONFIG_DIR="$(dirname "$PG_CONFIG")"
+            PG_ROOT="$(dirname "$PG_CONFIG_DIR")"
+            
+            export PKG_CONFIG_PATH="${PG_ROOT}/lib/pkgconfig:$PKG_CONFIG_PATH"
+            export LDFLAGS="-L${PG_ROOT}/lib $LDFLAGS"
+            export CPPFLAGS="-I${PG_ROOT}/include $CPPFLAGS"
             
             if [[ $target == "install" ]]; then
                 sudo make -C ${directory} $args $target
