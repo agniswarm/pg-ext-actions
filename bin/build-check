@@ -17,9 +17,9 @@
 set -euo pipefail
 IFS=$'\n\t'
 
-log()  { printf '\033[1;34m[build-check]\033[0m %s\n' "$*"; }
-ok()   { printf '\033[1;32m[build-check]\033[0m %s\n' "$*"; }
-err()  { printf '\033[1;31m[build-check]\033[0m %s\n' "$*"; }
+log()  { printf '\033[1;34m[build-check]\033[0m %s\n' "$*" >&2; }
+ok()   { printf '\033[1;32m[build-check]\033[0m %s\n' "$*" >&2; }
+err()  { printf '\033[1;31m[build-check]\033[0m %s\n' "$*" >&2; }
 
 detect_os() {
     case "$(uname -s)" in
@@ -201,6 +201,7 @@ detect_windows_build_tools() {
             fi
         fi
         
+        # Output only the result
         echo "$found_tool|$tool_path"
         return 0
     else
