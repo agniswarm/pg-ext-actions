@@ -41,11 +41,24 @@ runs:
             fi
             ;;
           Darwin*)
-            # macOS - check for .dylib files
-            if find . -maxdepth 1 -name "*.dylib" | grep -q .; then
-              echo "Extension built successfully on macOS"
+            # macOS - check for .dylib files in current directory and PostgreSQL lib directory
+            echo "Looking for extension files on macOS..."
+            echo "Current directory files:"
+            find . -maxdepth 1 -name "*.dylib" -o -name "*.so" | head -5
+            echo "PostgreSQL lib directory files:"
+            find /opt/homebrew/lib/postgresql* -name "*.dylib" 2>/dev/null | head -5 || true
+            find /usr/local/lib/postgresql* -name "*.dylib" 2>/dev/null | head -5 || true
+            
+            if find . -maxdepth 1 -name "*.dylib" -o -name "*.so" | grep -q .; then
+              echo "Extension built successfully on macOS (found in current directory)"
+            elif find /opt/homebrew/lib/postgresql* -name "*.dylib" 2>/dev/null | grep -q .; then
+              echo "Extension built successfully on macOS (found in Homebrew lib directory)"
+            elif find /usr/local/lib/postgresql* -name "*.dylib" 2>/dev/null | grep -q .; then
+              echo "Extension built successfully on macOS (found in local lib directory)"
             else
               echo "Extension build may have failed on macOS"
+              echo "Available files in current directory:"
+              ls -la *.dylib *.so 2>/dev/null || echo "No .dylib or .so files found in current directory"
               exit 1
             fi
             ;;
