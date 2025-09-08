@@ -290,6 +290,13 @@ EOF
             
             if [ -f "Makefile.win" ] && command -v nmake >/dev/null 2>&1; then
                 log "Using nmake with Makefile.win"
+                # Export PGXS environment variable for nmake
+                if [ -n "$PGXS" ]; then
+                    log "Using PGXS: $PGXS"
+                    export PGXS
+                else
+                    log "Warning: PGXS not set, nmake may not find pgxs.mk"
+                fi
                 if [ -n "$extra" ]; then
                     cmd_arr=( nmake /NOLOGO /F Makefile.win $extra $target )
                 else

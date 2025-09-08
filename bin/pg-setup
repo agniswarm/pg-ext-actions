@@ -226,6 +226,25 @@ install_postgresql_windows() {
         echo "PostgreSQL contrib is included by default on Windows"
     fi
     
+    # Derive PGXS and export to GitHub Actions environment so nmake can include pgxs.mk
+    if command -v pg_config >/dev/null 2>&1; then
+        PGXS_PATH="$(pg_config --pgxs 2>/dev/null || true)"
+        if [ -n "$PGXS_PATH" ]; then
+            echo "PGXS determined: $PGXS_PATH"
+            # For GitHub Actions, write to GITHUB_ENV so later steps can read it
+            if [ -n "$GITHUB_ENV" ]; then
+                echo "PGXS=$PGXS_PATH" >> "$GITHUB_ENV"
+            else
+                # Fallback for local runs
+                export PGXS="$PGXS_PATH"
+            fi
+        else
+            echo "Warning: pg_config --pgxs returned empty; PGXS not exported."
+        fi
+    else
+        echo "Warning: pg_config not found; PGXS cannot be exported."
+    fi
+    
     # OS-specific optimizations
     case "$os_version" in
         windows-2022|windows-2025|windows-11|windows-10)
