@@ -1,0 +1,47 @@
+{
+  "postgresql_downloads": {
+    "windows": {
+      "17": {
+        "url": "https://get.enterprisedb.com/postgresql/postgresql-17.6-1-windows-x64-binaries.zip",
+        "version": "17.6",
+        "filename": "postgresql-17.6-1-windows-x64-binaries.zip",
+        "extracted_dir": "pgsql",
+        "description": "PostgreSQL 17.6 for Windows x64"
+      },
+      "16": {
+        "url": "https://get.enterprisedb.com/postgresql/postgresql-16.10-1-windows-x64-binaries.zip",
+        "version": "16.10",
+        "filename": "postgresql-16.10-1-windows-x64-binaries.zip",
+        "extracted_dir": "pgsql",
+        "description": "PostgreSQL 16.10 for Windows x64"
+      },
+      "15": {
+        "url": "https://get.enterprisedb.com/postgresql/postgresql-15.14-1-windows-x64-binaries.zip",
+        "version": "15.14",
+        "filename": "postgresql-15.14-1-windows-x64-binaries.zip",
+        "extracted_dir": "pgsql",
+        "description": "PostgreSQL 15.14 for Windows x64"
+      },
+      "14": {
+        "url": "https://get.enterprisedb.com/postgresql/postgresql-14.19-1-windows-x64-binaries.zip",
+        "version": "14.19",
+        "filename": "postgresql-14.19-1-windows-x64-binaries.zip",
+        "extracted_dir": "pgsql",
+        "description": "PostgreSQL 14.19 for Windows x64"
+      },
+      "13": {
+        "url": "https://get.enterprisedb.com/postgresql/postgresql-13.22-1-windows-x64-binaries.zip",
+        "version": "13.22",
+        "filename": "postgresql-13.22-1-windows-x64-binaries.zip",
+        "extracted_dir": "pgsql",
+        "description": "PostgreSQL 13.22 for Windows x64"
+      }
+    },
+    "metadata": {
+      "source": "EnterpriseDB",
+      "last_updated": "2024-01-01",
+      "supported_versions": ["13", "14", "15", "16", "17"],
+      "notes": "Direct download URLs for PostgreSQL Windows binaries from EnterpriseDB"
+    }
+  }
+}

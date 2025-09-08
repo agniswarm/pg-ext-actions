@@ -166,60 +166,146 @@ install_postgresql_macos() {
     esac
 }
 
-# Function to install PostgreSQL on Windows
+# Function to parse JSON and extract download information
+parse_download_info() {
+    local version="$1"
+    local downloads_file="$2"
+    
+    # Extract download URL and filename from JSON using basic parsing
+    local download_url=""
+    local download_filename=""
+    
+    # Use grep and sed to extract the URL and filename for the specific version
+    download_url=$(grep -A 3 "\"$version\":" "$downloads_file" | grep '"url"' | sed 's/.*"url": *"\([^"]*\)".*/\1/')
+    download_filename=$(grep -A 3 "\"$version\":" "$downloads_file" | grep '"filename"' | sed 's/.*"filename": *"\([^"]*\)".*/\1/')
+    
+    if [[ -z "$download_url" || -z "$download_filename" ]]; then
+        echo "Error: Could not find download information for PostgreSQL version $version in $downloads_file"
+        echo "Available versions in the file:"
+        grep -o '"[0-9]\+":' "$downloads_file" | sed 's/["":]//g' | tr '\n' ' '
+        echo ""
+        return 1
+    fi
+    
+    echo "$download_url|$download_filename"
+    return 0
+}
+
+# Function to install PostgreSQL on Windows using direct download from EnterpriseDB
 install_postgresql_windows() {
     local version=$1
     local contrib=$2
     local os_version="$3"
+    local pf_root="/c/Program Files/PostgreSQL/$version"
+    local pf_bin="$pf_root/bin"
+
+    echo "Installing PostgreSQL $version on Windows using direct download..."
+
+    # Load download URLs from JSON file
+    local downloads_file="postgresql-downloads.json"
     
-    # Check if Chocolatey is installed
-    if ! command -v choco &> /dev/null; then
-        echo "Installing Chocolatey..."
-        powershell -Command "Set-ExecutionPolicy Bypass -Scope Process -Force; [System.Net.ServicePointManager]::SecurityProtocol = [System.Net.ServicePointManager]::SecurityProtocol -bor 3072; iex ((New-Object System.Net.WebClient).DownloadString('https://community.chocolatey.org/install.ps1'))"
+    if [[ ! -f "$downloads_file" ]]; then
+        echo "Error: $downloads_file not found. Cannot determine download URL for PostgreSQL $version"
+        echo "Please ensure the downloads file is available in the current directory"
+        exit 1
     fi
     
-    # Check available PostgreSQL packages first
-    echo "Checking available PostgreSQL packages..."
-    choco search postgresql | grep -i postgresql || true
+    # Parse download information from JSON
+    local download_info
+    if ! download_info=$(parse_download_info "$version" "$downloads_file"); then
+        exit 1
+    fi
     
-    # Install PostgreSQL using version-specific package name
-    echo "Installing PostgreSQL $version..."
-    if ! choco install postgresql$version -y; then
-        echo "Failed to install postgresql$version, trying alternative package name..."
-        if ! choco install postgresql --version $version -y; then
-            echo "Failed to install PostgreSQL $version via Chocolatey"
-            echo "Available PostgreSQL packages:"
-            choco search postgresql
-            exit 1
+    # Split the result (URL|filename)
+    local download_url="${download_info%|*}"
+    local download_filename="${download_info#*|}"
+    
+    echo "Found download info for PostgreSQL $version:"
+    echo "  URL: $download_url"
+    echo "  Filename: $download_filename"
+
+    echo "Downloading PostgreSQL $version from: $download_url"
+    
+    # Download PostgreSQL
+    if command -v curl >/dev/null 2>&1; then
+        curl -L -o "$download_filename" "$download_url"
+    elif command -v wget >/dev/null 2>&1; then
+        wget -O "$download_filename" "$download_url"
+    else
+        echo "Error: Neither curl nor wget found. Cannot download PostgreSQL"
+        exit 1
+    fi
+
+    if [[ ! -f "$download_filename" ]]; then
+        echo "Error: Failed to download PostgreSQL $version"
+        exit 1
+    fi
+
+    echo "Downloaded: $download_filename"
+
+    # Extract the zip file
+    echo "Extracting PostgreSQL..."
+    if command -v unzip >/dev/null 2>&1; then
+        unzip -q "$download_filename"
+    else
+        echo "Error: unzip not found. Cannot extract PostgreSQL"
+        exit 1
+    fi
+
+    # Find the extracted directory (should be something like "pgsql" or "postgresql-*")
+    local extracted_dir=""
+    for dir in pgsql postgresql-*; do
+        if [[ -d "$dir" ]]; then
+            extracted_dir="$dir"
+            break
         fi
+    done
+
+    if [[ -z "$extracted_dir" ]]; then
+        echo "Error: Could not find extracted PostgreSQL directory"
+        exit 1
     fi
-    
+
+    echo "Found extracted directory: $extracted_dir"
+
+    # Create Program Files directory if it doesn't exist
+    mkdir -p "/c/Program Files/PostgreSQL"
+
+    # Copy PostgreSQL to Program Files
+    echo "Installing PostgreSQL to Program Files..."
+    cp -r "$extracted_dir" "/c/Program Files/PostgreSQL/$version"
+
+    # Clean up downloaded files
+    rm -f "$download_filename"
+    rm -rf "$extracted_dir"
+
     # Add PostgreSQL to PATH for this session
-    export PATH="$PATH:/c/Program Files/PostgreSQL/$version/bin"
+    export PATH="$pf_bin:$PATH"
+    echo "Added PostgreSQL bin to PATH: $pf_bin"
     
     # Wait a moment for installation to complete
-    sleep 5
+    sleep 2
     
     # Initialize database if it doesn't exist
-    if [ ! -d "/c/Program Files/PostgreSQL/$version/data" ]; then
-        "/c/Program Files/PostgreSQL/$version/bin/initdb.exe" -D "/c/Program Files/PostgreSQL/$version/data" || true
+    if [[ -x "$pf_bin/initdb.exe" && ! -d "$pf_root/data" ]]; then
+        echo "Initializing PostgreSQL database..."
+        "$pf_bin/initdb.exe" -D "$pf_root/data" || true
     fi
     
     # Start PostgreSQL service (try different service name patterns)
     echo "Starting PostgreSQL service..."
-    if ! net start postgresql-x64-$version 2>/dev/null; then
-        echo "Trying alternative service name..."
-        if ! net start postgresql-$version 2>/dev/null; then
-            echo "Trying generic service name..."
-            net start postgresql 2>/dev/null || echo "Could not start PostgreSQL service automatically"
-        fi
-    fi
+    net start "postgresql-x64-$version" >/dev/null 2>&1 || true
+    net start "postgresql-$version" >/dev/null 2>&1 || true
+    net start postgresql >/dev/null 2>&1 || true
     
     # Wait for service to start
     sleep 3
     
     # Create database
-    "/c/Program Files/PostgreSQL/$version/bin/createdb.exe" postgres || true
+    if [[ -x "$pf_bin/createdb.exe" ]]; then
+        echo "Creating postgres database..."
+        "$pf_bin/createdb.exe" postgres || true
+    fi
     
     # Install contrib if needed
     if [[ $contrib == 'true' ]]; then
