@@ -110,7 +110,7 @@ run_make() {
             export CPPFLAGS="-I${PG_ROOT}/include $CPPFLAGS"
             
             if [[ $target == "install" ]]; then
-                sudo make -C ${directory} $args $target
+                sudo -E env PG_CONFIG="$PG_CONFIG" PKG_CONFIG_PATH="$PKG_CONFIG_PATH" LDFLAGS="$LDFLAGS" CPPFLAGS="$CPPFLAGS" make -C ${directory} $args $target
             else
                 make -C ${directory} $args $target
             fi

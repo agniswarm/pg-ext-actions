@@ -136,9 +136,9 @@ run_make() {
 
             if [ "$target" = "install" ]; then
                 if [ -n "$extra" ]; then
-                    cmd_arr=( sudo make $extra $target )
+                    cmd_arr=( sudo -E env PG_CONFIG="$PG_CONFIG" PKG_CONFIG_PATH="$PKG_CONFIG_PATH" LDFLAGS="$LDFLAGS" CPPFLAGS="$CPPFLAGS" make $extra $target )
                 else
-                    cmd_arr=( sudo make $target )
+                    cmd_arr=( sudo -E env PG_CONFIG="$PG_CONFIG" PKG_CONFIG_PATH="$PKG_CONFIG_PATH" LDFLAGS="$LDFLAGS" CPPFLAGS="$CPPFLAGS" make $target )
                 fi
             else
                 if [ -n "$extra" ]; then
