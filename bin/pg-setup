@@ -41,14 +41,13 @@ echo "Target OS: $OS (input: $OS_VERSION)"
 echo "Requested PG version: $PG_VERSION"
 
 #
-# Linux (apt) - kept essentially the same as your prior flow
+# Linux (apt) - preserved behavior
 #
 install_postgresql_linux() {
   local version=$1
   local contrib=$2
 
   echo "Installing PostgreSQL $version on Linux..."
-  # Best-effort removal of old packages (kept from original)
   dpkg-query -f '${Package}\n' -W | grep ^postgresql | xargs -r sudo dpkg --purge || true
 
   curl -fsSL https://www.postgresql.org/media/keys/ACCC4CF8.asc | sudo apt-key add - || true
@@ -63,7 +62,6 @@ install_postgresql_linux() {
     DEBIAN_FRONTEND=noninteractive sudo apt-get install -y postgresql-contrib-"$version" || true
   fi
 
-  # Make local connections trust for CI convenience
   sudo tee /etc/postgresql/"$version"/main/pg_hba.conf >/dev/null <<EOF
 local all all trust
 host all all 0/0 trust
@@ -89,7 +87,6 @@ install_postgresql_macos() {
 
   brew install "postgresql@$version" || true
 
-  # Ensure PATH for the current run and persist for interactive shells (non-blocking)
   export PATH="/opt/homebrew/opt/postgresql@$version/bin:$PATH"
   echo "export PATH=\"/opt/homebrew/opt/postgresql@$version/bin:\$PATH\"" >> ~/.zshrc || true
   echo "export PATH=\"/opt/homebrew/opt/postgresql@$version/bin:\$PATH\"" >> ~/.bash_profile || true
@@ -98,7 +95,6 @@ install_postgresql_macos() {
   brew services start "postgresql@$version" || true
   sleep 2
 
-  # Ensure postgres role/db exist (best-effort)
   /opt/homebrew/opt/postgresql@"$version"/bin/psql -d postgres -c '\du' >/dev/null 2>&1 || true
   /opt/homebrew/opt/postgresql@"$version"/bin/psql -d postgres -c "CREATE ROLE postgres WITH LOGIN SUPERUSER CREATEDB CREATEROLE;" 2>/dev/null || true
   /opt/homebrew/opt/postgresql@"$version"/bin/createdb postgres || true
@@ -107,7 +103,7 @@ install_postgresql_macos() {
 }
 
 #
-# Windows installer: keep installer behavior like before, but add robust PGXS/PG_* exports
+# Windows installer: restored original Chocolatey logic + robust PGXS/PG_* exports
 #
 install_postgresql_windows() {
   local version=$1
@@ -116,36 +112,40 @@ install_postgresql_windows() {
 
   echo "Installing PostgreSQL $version on Windows..."
 
-  # Install Chocolatey if missing (kept from original)
+  # Install Chocolatey if missing
   if ! command -v choco &>/dev/null; then
     echo "Installing Chocolatey..."
     powershell -NoProfile -InputFormat None -ExecutionPolicy Bypass -Command \
       "Set-ExecutionPolicy Bypass -Scope Process -Force; [System.Net.ServicePointManager]::SecurityProtocol = [System.Net.ServicePointManager]::SecurityProtocol -bor 3072; iex ((New-Object System.Net.WebClient).DownloadString('https://community.chocolatey.org/install.ps1'))"
   fi
 
-  # Try versioned package, else generic
-  echo "Attempting Chocolatey install (this step mirrors previous behavior)..."
-  if choco install "postgresql$version" -y >/dev/null 2>&1; then
-    echo "Chocolatey installed postgresql$version"
+  # --- RESTORED: try per-version package first, then alternate names (like original script) ---
+  echo "Installing PostgreSQL $version via Chocolatey (original flow)..."
+  if choco install "postgresql$version" -y; then
+    echo "Installed postgresql$version via choco"
   else
-    echo "postgresql$version not available via choco; installing generic postgresql package"
-    choco install postgresql -y >/dev/null 2>&1 || true
+    echo "postgresql$version not available via choco; trying alternative package names..."
+    if choco install postgresql --version "$version" -y; then
+      echo "Installed postgresql (specific version) via choco"
+    else
+      echo "Falling back to generic postgresql package via choco"
+      choco install postgresql -y || true
+    fi
   fi
 
-  # Ensure Program Files bin is on PATH for this session (non-destructive)
+  # Try to ensure Program Files bin is on PATH for this session
   if [[ -d "$pf_bin" ]]; then
     export PATH="$pf_bin:$PATH"
   fi
 
-  # Allow installer time to settle
+  # Allow installer time
   sleep 4
 
-  # Try to initialize/start DB (best-effort; keep previous behavior)
+  # Try initdb / start service (best-effort)
   if [[ -x "$pf_bin/initdb.exe" && ! -d "/c/Program Files/PostgreSQL/$version/data" ]]; then
     "$pf_bin/initdb.exe" -D "/c/Program Files/PostgreSQL/$version/data" || true
   fi
 
-  # Try starting service (best-effort)
   net start "postgresql-x64-$version" >/dev/null 2>&1 || true
   net start "postgresql-$version" >/dev/null 2>&1 || true
   net start postgresql >/dev/null 2>&1 || true
@@ -156,26 +156,26 @@ install_postgresql_windows() {
   fi
 
   #
-  # ---- PGXS / PG_* detection and export (robust, minimal)
+  # Robust PGXS detection and export (keeps previous improvements)
   #
   echo "Detecting pg_config and PGXS..."
 
-  # Prefer Program Files pg_config if present
   PF_PG_CONFIG="$pf_bin/pg_config.exe"
   PG_CONFIG_CMD=""
 
   if [[ -x "$PF_PG_CONFIG" ]]; then
+    echo "Using pg_config from Program Files: $PF_PG_CONFIG"
     PG_CONFIG_CMD="$PF_PG_CONFIG"
   elif command -v pg_config &>/dev/null; then
-    PG_CONFIG_CMD="$(command -v pg_config)"
+    PATH_PG_CONFIG="$(command -v pg_config)"
+    echo "pg_config on PATH: $PATH_PG_CONFIG"
+    PG_CONFIG_CMD="$PATH_PG_CONFIG"
   else
     echo "Error: pg_config not found. Postgres installed but dev tools may be missing."
-    # Do not fail the whole install step here — emit a clear message and exit non-zero
     echo "Please ensure PostgreSQL development files are available on Windows runner."
     exit 1
   fi
 
-  # Query pg_config for candidate PGXS
   PGXS_CAND="$("$PG_CONFIG_CMD" --pgxs 2>/dev/null || true)"
   if [[ -n "$PGXS_CAND" && -f "$PGXS_CAND" ]]; then
     echo "pgxs.mk found at: $PGXS_CAND"
@@ -188,7 +188,6 @@ install_postgresql_windows() {
   else
     echo "pgxs.mk not present at pg_config --pgxs ('$PGXS_CAND'). Falling back to exporting PG_* variables."
 
-    # Query canonical directories from pg_config (best-effort)
     PG_BINDIR="$("$PG_CONFIG_CMD" --bindir 2>/dev/null || true)"
     PG_INCLUDEDIR="$("$PG_CONFIG_CMD" --includedir 2>/dev/null || true)"
     PG_LIBDIR="$("$PG_CONFIG_CMD" --libdir 2>/dev/null || true)"
@@ -226,7 +225,7 @@ install_postgresql_windows() {
   echo "Windows install/detection complete."
 }
 
-# dispatch to correct installer
+# dispatch
 case "$OS" in
   linux)  install_postgresql_linux "$PG_VERSION" "$CONTRIB" ;;
   macos)  install_postgresql_macos "$PG_VERSION" "$CONTRIB" ;;
