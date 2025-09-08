@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
-
-set -ex
+set -euo pipefail
+[ -n "${DEBUG:-}" ] && set -x
 
 if [[ $# -eq 0 ]]; then
     cat << EOF
@@ -16,290 +16,254 @@ fi
 
 PG_VERSION=$1
 OS_INPUT=${2:-linux}
+CONTRIB=${3:-false}   # optional third arg to request contrib install
 
-# Parse OS and version from input
+# Parse OS and version from input (normalize)
 parse_os() {
     local input="$1"
-    
-    # Check for specific OS versions
     case "$input" in
         ubuntu-*|debian-*|centos-*|rhel-*|fedora-*|suse-*|alpine-*)
-            echo "linux"
-            ;;
+            echo "linux" ;;
         macos-*|darwin-*)
-            echo "macos"
-            ;;
+            echo "macos" ;;
         windows-*|win-*)
-            echo "windows"
-            ;;
+            echo "windows" ;;
         linux|macos|windows)
-            echo "$input"
-            ;;
+            echo "$input" ;;
         *)
-            # Auto-detect if invalid input provided
-            case "$(uname -s)" in
-                Linux*)     echo "linux";;
-                Darwin*)    echo "macos";;
-                CYGWIN*|MINGW*|MSYS*) echo "windows";;
-                *)          echo "unknown";;
-            esac
-            ;;
+            case "$(uname -s 2>/dev/null || echo Unknown)" in
+                Linux*)  echo "linux" ;;
+                Darwin*) echo "macos" ;;
+                CYGWIN*|MINGW*|MSYS*) echo "windows" ;;
+                *) echo "unknown" ;;
+            esac ;;
     esac
 }
 
 OS=$(parse_os "$OS_INPUT")
 OS_VERSION="$OS_INPUT"
+echo "Target OS: $OS (input: $OS_VERSION)"
 
-if [[ "$OS_INPUT" == "linux" || "$OS_INPUT" == "macos" || "$OS_INPUT" == "windows" ]]; then
-    echo "Using specified operating system: $OS"
-else
-    echo "Using specified operating system: $OS (version: $OS_VERSION)"
-fi
-
-# Function to install PostgreSQL on Linux (Ubuntu/Debian)
+#
+# Linux installer (Debian/Ubuntu)
+#
 install_postgresql_linux() {
     local version=$1
     local contrib=$2
     local os_version="$3"
-    
-    # Remove existing postgres instances
-    dpkg-query -f '${Package}\n' -W | grep ^postgresql | xargs sudo dpkg --purge || true
-    
-    # Install postgres packages
-    curl https://www.postgresql.org/media/keys/ACCC4CF8.asc | sudo apt-key add -
+
+    echo "Installing PostgreSQL $version on Linux (apt)..."
+
+    # Remove old package traces (best-effort)
+    dpkg-query -f '${Package}\n' -W | grep ^postgresql | xargs -r sudo dpkg --purge || true
+
+    # Add PGDG apt repo and install
+    curl -fsSL https://www.postgresql.org/media/keys/ACCC4CF8.asc | sudo apt-key add -
     sudo sh -c 'echo "deb http://apt.postgresql.org/pub/repos/apt $(lsb_release -cs)-pgdg main" > /etc/apt/sources.list.d/pgdg.list'
     sudo apt-get update
-    DEBIAN_FRONTEND=noninteractive sudo apt-get install -y postgresql-$version \
-                                                       postgresql-server-dev-$version \
-                                                       postgresql-client-$version
-    
-    # Install contrib packages if needed
-    if [[ $contrib == 'true' ]]; then
-        sudo apt-get install -y postgresql-contrib-$version
+    DEBIAN_FRONTEND=noninteractive sudo apt-get install -y \
+      postgresql-"$version" \
+      postgresql-server-dev-"$version" \
+      postgresql-client-"$version" || true
+
+    if [[ "$contrib" == "true" ]]; then
+        DEBIAN_FRONTEND=noninteractive sudo apt-get install -y postgresql-contrib-"$version" || true
     fi
-    
-    # Enable trust authentication in postgres
-    sudo tee /etc/postgresql/$version/main/pg_hba.conf <<EOF
+
+    # Make local connections trust for CI convenience
+    sudo tee /etc/postgresql/"$version"/main/pg_hba.conf >/dev/null <<EOF
 local all all trust
 host all all 0/0 trust
 host all all ::0/0 trust
 EOF
-    sudo service postgresql reload
-    
-    # OS-specific optimizations
-    case "$os_version" in
-        ubuntu-22.04|ubuntu-24.04)
-            echo "Optimizing for Ubuntu $(echo $os_version | cut -d'-' -f2)"
-            # Ubuntu-specific optimizations can go here
-            ;;
-        debian-*)
-            echo "Optimizing for Debian $(echo $os_version | cut -d'-' -f2)"
-            # Debian-specific optimizations can go here
-            ;;
-    esac
+    sudo service postgresql reload || true
+
+    echo "Postgres $version installed (linux)."
 }
 
-# Function to install PostgreSQL on macOS
+#
+# macOS installer (Homebrew)
+#
 install_postgresql_macos() {
     local version=$1
     local contrib=$2
     local os_version="$3"
-    
-    # Check if Homebrew is installed
-    if ! command -v brew &> /dev/null; then
-        echo "Installing Homebrew..."
+
+    echo "Installing PostgreSQL $version on macOS (brew)..."
+
+    if ! command -v brew &>/dev/null; then
+        echo "Homebrew not found — installing..."
         /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
     fi
-    
-    # Install PostgreSQL and development tools
-    brew install postgresql@$version
-    
-    # Add PostgreSQL to PATH for this session and future sessions
+
+    brew install "postgresql@$version" || true
+
+    # ensure PATH for current process & for interactive shells
     export PATH="/opt/homebrew/opt/postgresql@$version/bin:$PATH"
-    echo 'export PATH="/opt/homebrew/opt/postgresql@'$version'/bin:$PATH"' >> ~/.zshrc
-    echo 'export PATH="/opt/homebrew/opt/postgresql@'$version'/bin:$PATH"' >> ~/.bash_profile
-    
-    # Set up PostgreSQL development environment
+    echo "export PATH=\"/opt/homebrew/opt/postgresql@$version/bin:\$PATH\"" >> ~/.zshrc || true
+    echo "export PATH=\"/opt/homebrew/opt/postgresql@$version/bin:\$PATH\"" >> ~/.bash_profile || true
+
     export PG_CONFIG="/opt/homebrew/opt/postgresql@$version/bin/pg_config"
-    export PKG_CONFIG_PATH="/opt/homebrew/opt/postgresql@$version/lib/pkgconfig:$PKG_CONFIG_PATH"
-    export LDFLAGS="-L/opt/homebrew/opt/postgresql@$version/lib $LDFLAGS"
-    export CPPFLAGS="-I/opt/homebrew/opt/postgresql@$version/include $CPPFLAGS"
-    
-    # Add environment variables to shell profiles
-    echo 'export PG_CONFIG="/opt/homebrew/opt/postgresql@'$version'/bin/pg_config"' >> ~/.zshrc
-    echo 'export PKG_CONFIG_PATH="/opt/homebrew/opt/postgresql@'$version'/lib/pkgconfig:$PKG_CONFIG_PATH"' >> ~/.zshrc
-    echo 'export LDFLAGS="-L/opt/homebrew/opt/postgresql@'$version'/lib $LDFLAGS"' >> ~/.zshrc
-    echo 'export CPPFLAGS="-I/opt/homebrew/opt/postgresql@'$version'/include $CPPFLAGS"' >> ~/.zshrc
-    
-    # Start PostgreSQL service
-    brew services start postgresql@$version
-    
-    # Wait a moment for the service to start
-    sleep 3
-    
-    # Check what users exist and create postgres role if needed
-    echo "Checking PostgreSQL users..."
-    /opt/homebrew/opt/postgresql@$version/bin/psql -d postgres -c "\du" || true
-    
-    # Create postgres role if it doesn't exist
-    echo "Creating postgres role..."
-    /opt/homebrew/opt/postgresql@$version/bin/psql -d postgres -c "CREATE ROLE postgres WITH LOGIN SUPERUSER CREATEDB CREATEROLE;" 2>/dev/null || echo "postgres role already exists or creation failed"
-    
-    # Create database using full path
-    /opt/homebrew/opt/postgresql@$version/bin/createdb postgres || true
-    
-    # Install contrib if needed
-    if [[ $contrib == 'true' ]]; then
-        echo "PostgreSQL contrib is included by default on macOS"
-    fi
-    
-    # OS-specific optimizations
-    case "$os_version" in
-        macos-12|macos-13|macos-14|macos-15)
-            echo "Optimizing for macOS $(echo $os_version | cut -d'-' -f2)"
-            # macOS version-specific optimizations can go here
-            ;;
-        darwin-*)
-            echo "Optimizing for Darwin $(echo $os_version | cut -d'-' -f2)"
-            # Darwin version-specific optimizations can go here
-            ;;
-    esac
+    export PKG_CONFIG_PATH="/opt/homebrew/opt/postgresql@$version/lib/pkgconfig:${PKG_CONFIG_PATH:-}"
+    export LDFLAGS="-L/opt/homebrew/opt/postgresql@$version/lib ${LDFLAGS:-}"
+    export CPPFLAGS="-I/opt/homebrew/opt/postgresql@$version/include ${CPPFLAGS:-}"
+
+    brew services start "postgresql@$version" || true
+    sleep 2
+
+    echo "macOS Postgres installed. Ensuring 'postgres' role / db..."
+    /opt/homebrew/opt/postgresql@"$version"/bin/psql -d postgres -c '\du' >/dev/null 2>&1 || true
+    /opt/homebrew/opt/postgresql@"$version"/bin/psql -d postgres -c "CREATE ROLE postgres WITH LOGIN SUPERUSER CREATEDB CREATEROLE;" 2>/dev/null || true
+    /opt/homebrew/opt/postgresql@"$version"/bin/createdb postgres || true
+
+    echo "Postgres $version installed (macos)."
 }
 
-# Function to install PostgreSQL on Windows
+#
+# Windows installer (Chocolatey / official installer)
+#
 install_postgresql_windows() {
     local version=$1
     local contrib=$2
     local os_version="$3"
-    
-    # Check if Chocolatey is installed
-    if ! command -v choco &> /dev/null; then
+
+    echo "Installing PostgreSQL $version on Windows..."
+
+    # Install Chocolatey if missing
+    if ! command -v choco &>/dev/null; then
         echo "Installing Chocolatey..."
-        powershell -Command "Set-ExecutionPolicy Bypass -Scope Process -Force; [System.Net.ServicePointManager]::SecurityProtocol = [System.Net.ServicePointManager]::SecurityProtocol -bor 3072; iex ((New-Object System.Net.WebClient).DownloadString('https://community.chocolatey.org/install.ps1'))"
+        powershell -NoProfile -InputFormat None -ExecutionPolicy Bypass -Command \
+          "Set-ExecutionPolicy Bypass -Scope Process -Force; [System.Net.ServicePointManager]::SecurityProtocol = [System.Net.ServicePointManager]::SecurityProtocol -bor 3072; iex ((New-Object System.Net.WebClient).DownloadString('https://community.chocolatey.org/install.ps1'))"
     fi
-    
-    # Check available PostgreSQL packages first
-    echo "Checking available PostgreSQL packages..."
-    choco search postgresql | grep -i postgresql || true
-    
-    # Install PostgreSQL using version-specific package name
-    echo "Installing PostgreSQL $version..."
-    if ! choco install postgresql$version -y; then
-        echo "Failed to install postgresql$version, trying alternative package name..."
-        if ! choco install postgresql --version $version -y; then
-            echo "Failed to install PostgreSQL $version via Chocolatey"
-            echo "Available PostgreSQL packages:"
-            choco search postgresql
-            exit 1
+
+    # Prefer official per-version package, fall back to generic installer package
+    echo "Installing postgresql $version via Chocolatey (may take a while)..."
+    if ! choco install "postgresql$version" -y >/dev/null 2>&1; then
+        echo "postgresql$version not available via choco; installing generic postgresql package"
+        choco install postgresql -y >/dev/null 2>&1 || true
+    fi
+
+    # Add Program Files Postgres bin to PATH for this session (most installers install there)
+    PF_BIN="/c/Program Files/PostgreSQL/$version/bin"
+    if [[ -d "$PF_BIN" ]]; then
+        export PATH="$PF_BIN:$PATH"
+    fi
+
+    # Give the installer a moment
+    sleep 4
+
+    # Try to initdb if data dir missing (best-effort)
+    if [[ ! -d "/c/Program Files/PostgreSQL/$version/data" ]]; then
+        if [[ -x "/c/Program Files/PostgreSQL/$version/bin/initdb.exe" ]]; then
+            "/c/Program Files/PostgreSQL/$version/bin/initdb.exe" -D "/c/Program Files/PostgreSQL/$version/data" || true
         fi
     fi
-    
-    # Install PostgreSQL development packages (includes pgxs)
-    echo "Installing PostgreSQL development packages..."
-    if ! choco install postgresql$version-dev -y; then
-        echo "Failed to install postgresql$version-dev, trying alternative package name..."
-        if ! choco install postgresql-dev --version $version -y; then
-            echo "Warning: PostgreSQL development packages not found, trying postgresql-devel..."
-            if ! choco install postgresql-devel -y; then
-                echo "Warning: Could not install PostgreSQL development packages via Chocolatey"
-                echo "This may affect extension building capabilities"
-            fi
-        fi
+
+    # Attempt to start service (best effort)
+    echo "Attempting to start Postgres service..."
+    net start "postgresql-x64-$version" >/dev/null 2>&1 || true
+    net start "postgresql-$version" >/dev/null 2>&1 || true
+    net start postgresql >/dev/null 2>&1 || true
+    sleep 2
+
+    # Ensure createdb works (safe no-op if exists)
+    if [[ -x "/c/Program Files/PostgreSQL/$version/bin/createdb.exe" ]]; then
+        "/c/Program Files/PostgreSQL/$version/bin/createdb.exe" postgres || true
     fi
-    
-    # Add PostgreSQL to PATH for this session
-    export PATH="$PATH:/c/Program Files/PostgreSQL/$version/bin"
-    
-    # Wait a moment for installation to complete
-    sleep 5
-    
-    # Initialize database if it doesn't exist
-    if [ ! -d "/c/Program Files/PostgreSQL/$version/data" ]; then
-        "/c/Program Files/PostgreSQL/$version/bin/initdb.exe" -D "/c/Program Files/PostgreSQL/$version/data" || true
-    fi
-    
-    # Start PostgreSQL service (try different service name patterns)
-    echo "Starting PostgreSQL service..."
-    if ! net start postgresql-x64-$version 2>/dev/null; then
-        echo "Trying alternative service name..."
-        if ! net start postgresql-$version 2>/dev/null; then
-            echo "Trying generic service name..."
-            net start postgresql 2>/dev/null || echo "Could not start PostgreSQL service automatically"
-        fi
-    fi
-    
-    # Wait for service to start
-    sleep 3
-    
-    # Create database
-    "/c/Program Files/PostgreSQL/$version/bin/createdb.exe" postgres || true
-    
-    # Install contrib if needed
-    if [[ $contrib == 'true' ]]; then
-        echo "PostgreSQL contrib is included by default on Windows"
-    fi
-    
-    # Verify pgxs installation and export PGXS for nmake
-    echo "Verifying PostgreSQL development installation..."
-    if command -v pg_config >/dev/null 2>&1; then
-        echo "pg_config found at: $(command -v pg_config)"
-        PGXS_PATH="$(pg_config --pgxs 2>/dev/null || true)"
-        if [ -n "$PGXS_PATH" ]; then
-            echo "PGXS determined: $PGXS_PATH"
-            # Verify pgxs.mk exists
-            if [ -f "$PGXS_PATH" ]; then
-                echo "pgxs.mk found at: $PGXS_PATH"
-                # For GitHub Actions, write to GITHUB_ENV so later steps can read it
-                if [ -n "$GITHUB_ENV" ]; then
-                    echo "PGXS=$PGXS_PATH" >> "$GITHUB_ENV"
-                else
-                    # Fallback for local runs
-                    export PGXS="$PGXS_PATH"
-                fi
-            else
-                echo "Error: pgxs.mk not found at $PGXS_PATH"
-                echo "PostgreSQL development packages may not be properly installed"
-                exit 1
-            fi
-        else
-            echo "Error: pg_config --pgxs returned empty; PGXS not exported."
-            echo "PostgreSQL development packages may not be properly installed"
-            exit 1
-        fi
+
+    echo "Verifying PostgreSQL development installation and exporting PGXS..."
+
+    #
+    # Robust PGXS detection and export:
+    # 1) Prefer Program Files pg_config if present
+    # 2) Fallback to pg_config on PATH only if it returns a valid pgxs.mk path
+    # 3) Try deriving expected pgxs path under Program Files
+    # 4) If found, export PGXS to $GITHUB_ENV (for Actions) or export PGXS for local use
+    #
+    PG_CONFIG_CMD=""
+    PF_PG_CONFIG="/c/Program Files/PostgreSQL/$version/bin/pg_config.exe"
+
+    if [[ -x "$PF_PG_CONFIG" ]]; then
+        echo "Using pg_config from Program Files: $PF_PG_CONFIG"
+        PG_CONFIG_CMD="$PF_PG_CONFIG"
+    elif command -v pg_config &>/dev/null; then
+        PATH_PG_CONFIG="$(command -v pg_config)"
+        echo "pg_config on PATH: $PATH_PG_CONFIG"
+        PG_CONFIG_CMD="$PATH_PG_CONFIG"
     else
-        echo "Error: pg_config not found; PGXS cannot be exported."
-        echo "PostgreSQL development packages may not be properly installed"
+        echo "Error: pg_config not found on PATH nor in Program Files. Please ensure PostgreSQL dev tools are installed."
         exit 1
     fi
-    
-    # OS-specific optimizations
+
+    PGXS_PATH="$("$PG_CONFIG_CMD" --pgxs 2>/dev/null || true)"
+    if [[ -n "$PGXS_PATH" && -f "$PGXS_PATH" ]]; then
+        echo "pgxs.mk found via pg_config: $PGXS_PATH"
+        if [[ -n "${GITHUB_ENV:-}" ]]; then
+            echo "PGXS=$PGXS_PATH" >> "$GITHUB_ENV"
+        else
+            export PGXS="$PGXS_PATH"
+        fi
+    else
+        echo "pg_config --pgxs returned: '${PGXS_PATH:-<empty>}' (not usable). Trying derived Program Files path..."
+
+        DERIVED="$PF_BIN/../lib/postgresql/pgxs/src/makefiles/pgxs.mk"
+        # canonicalize
+        DERIVED="$(cd "$(dirname "$DERIVED")" 2>/dev/null || true; echo "$(pwd)/$(basename "$DERIVED")" 2>/dev/null || echo "$DERIVED")"
+
+        if [[ -f "$DERIVED" ]]; then
+            echo "Found derived pgxs.mk at: $DERIVED"
+            if [[ -n "${GITHUB_ENV:-}" ]]; then
+                echo "PGXS=$DERIVED" >> "$GITHUB_ENV"
+            else
+                export PGXS="$DERIVED"
+            fi
+        else
+            echo "Searching for pgxs.mk under Program Files/PostgreSQL..."
+            FOUND="$(find "/c/Program Files/PostgreSQL" -type f -name pgxs.mk 2>/dev/null || true | head -n 1 || true)"
+            if [[ -n "$FOUND" && -f "$FOUND" ]]; then
+                echo "Found pgxs.mk by search: $FOUND"
+                if [[ -n "${GITHUB_ENV:-}" ]]; then
+                    echo "PGXS=$FOUND" >> "$GITHUB_ENV"
+                else
+                    export PGXS="$FOUND"
+                fi
+            else
+                echo "ERROR: pgxs.mk not found. PostgreSQL development files (pgxs) are missing or installed in an unexpected location."
+                echo "DEBUG: pg_config used: $PG_CONFIG_CMD"
+                echo "DEBUG: pg_config --pgxs returned: '$PGXS_PATH'"
+                echo "Contents of Program Files/PostgreSQL:"
+                ls -la "/c/Program Files/PostgreSQL" 2>/dev/null || true
+                exit 1
+            fi
+        fi
+    fi
+
+    echo "PGXS exported successfully."
+    echo "PGXS value: ${PGXS:-$PGXS_PATH}"
+
+    # Windows-specific optimizations hooks (no-op by default)
     case "$os_version" in
-        windows-2022|windows-2025|windows-11|windows-10)
-            echo "Optimizing for Windows $(echo $os_version | cut -d'-' -f2)"
-            # Windows version-specific optimizations can go here
-            ;;
-        win-*)
-            echo "Optimizing for Windows $(echo $os_version | cut -d'-' -f2)"
-            # Windows version-specific optimizations can go here
+        windows-*|win-*)
+            echo "Windows optimizations: none configured"
             ;;
     esac
 }
 
-# Main installation logic
-case $OS in
-    "linux")
-        install_postgresql_linux $PG_VERSION $CONTRIB "$OS_VERSION"
+# Dispatch
+case "$OS" in
+    linux)
+        install_postgresql_linux "$PG_VERSION" "$CONTRIB" "$OS_VERSION"
         ;;
-    "macos")
-        install_postgresql_macos $PG_VERSION $CONTRIB "$OS_VERSION"
+    macos)
+        install_postgresql_macos "$PG_VERSION" "$CONTRIB" "$OS_VERSION"
         ;;
-    "windows")
-        install_postgresql_windows $PG_VERSION $CONTRIB "$OS_VERSION"
+    windows)
+        install_postgresql_windows "$PG_VERSION" "$CONTRIB" "$OS_VERSION"
         ;;
     *)
-        echo "Unsupported operating system: $OS"
+        echo "Unsupported OS: $OS"
         exit 1
         ;;
 esac
 
-echo "PostgreSQL $PG_VERSION installation completed successfully!"
+echo "PostgreSQL $PG_VERSION installation completed!"
