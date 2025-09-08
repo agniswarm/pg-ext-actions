@@ -137,6 +137,14 @@ install_postgresql_macos() {
     # Wait a moment for the service to start
     sleep 3
     
+    # Check what users exist and create postgres role if needed
+    echo "Checking PostgreSQL users..."
+    /opt/homebrew/opt/postgresql@$version/bin/psql -d postgres -c "\du" || true
+    
+    # Create postgres role if it doesn't exist
+    echo "Creating postgres role..."
+    /opt/homebrew/opt/postgresql@$version/bin/psql -d postgres -c "CREATE ROLE postgres WITH LOGIN SUPERUSER CREATEDB CREATEROLE;" 2>/dev/null || echo "postgres role already exists or creation failed"
+    
     # Create database using full path
     /opt/homebrew/opt/postgresql@$version/bin/createdb postgres || true
     
