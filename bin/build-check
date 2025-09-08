@@ -203,8 +203,13 @@ run_make() {
             # Add PostgreSQL bin directory to PATH (ensure it's first)
             export PATH="${PG_CONFIG_DIR}:${PATH}"
             
-            # Set Windows-style PATH for make tools
+            # Set Windows-style PATH for make tools (this will be used by mingw32-make)
             export PATH_WIN="${PG_CONFIG_DIR_WIN};${PATH_WIN:-}"
+            
+            # Also set the regular PATH to Windows format for mingw32-make
+            # Convert the entire PATH to Windows format
+            PATH_WIN_FULL=$(echo "$PATH" | sed 's|^/c/|C:/|g' | sed 's|/|\\|g' | sed 's|:|;|g')
+            export PATH_WIN_FULL
             
             # Create a wrapper script for pg_config in the current directory
             # This ensures mingw32-make can find pg_config even if PATH issues persist
@@ -239,6 +244,26 @@ EOF
             
             # Try different build methods in order of preference
             # First try nmake with Makefile.win (preferred for Windows)
+            log "Checking for nmake and Makefile.win..."
+            log "Makefile.win exists: $([ -f "Makefile.win" ] && echo "YES" || echo "NO")"
+            log "nmake available: $(command -v nmake >/dev/null 2>&1 && echo "YES" || echo "NO")"
+            
+            # If Makefile.win exists but nmake is not available, try to find it
+            if [ -f "Makefile.win" ] && ! command -v nmake >/dev/null 2>&1; then
+                log "Makefile.win found but nmake not available. Looking for nmake in common locations..."
+                # Look for nmake in Visual Studio Build Tools locations
+                for nmake_path in "/c/Program Files (x86)/Microsoft Visual Studio/2019/BuildTools/VC/Tools/MSVC/*/bin/Hostx64/x64/nmake.exe" \
+                                 "/c/Program Files (x86)/Microsoft Visual Studio/2022/BuildTools/VC/Tools/MSVC/*/bin/Hostx64/x64/nmake.exe" \
+                                 "/c/Program Files/Microsoft Visual Studio/2019/Professional/VC/Tools/MSVC/*/bin/Hostx64/x64/nmake.exe" \
+                                 "/c/Program Files/Microsoft Visual Studio/2022/Professional/VC/Tools/MSVC/*/bin/Hostx64/x64/nmake.exe"; do
+                    if ls $nmake_path >/dev/null 2>&1; then
+                        export PATH="$(dirname $(ls $nmake_path | head -1)):$PATH"
+                        log "Found nmake at: $(ls $nmake_path | head -1)"
+                        break
+                    fi
+                done
+            fi
+            
             if [ -f "Makefile.win" ] && command -v nmake >/dev/null 2>&1; then
                 log "Using nmake with Makefile.win"
                 if [ -n "$extra" ]; then
@@ -254,16 +279,14 @@ EOF
                 export PKG_CONFIG_PATH
                 export LDFLAGS
                 export CPPFLAGS
-                # Ensure PATH is exported for the make process
-                export PATH
                 # Set Windows-style PATH for mingw32-make
-                export PATH_WIN
+                export PATH_WIN_FULL
                 log "Final PATH for make: ${PATH}"
-                log "Windows PATH for mingw32-make: ${PATH_WIN}"
+                log "Windows PATH for mingw32-make: ${PATH_WIN_FULL}"
                 if [ -n "$extra" ]; then
-                    cmd_arr=( env PATH_WIN="$PATH_WIN" mingw32-make $extra $target )
+                    cmd_arr=( env PATH="$PATH_WIN_FULL" mingw32-make $extra $target )
                 else
-                    cmd_arr=( env PATH_WIN="$PATH_WIN" mingw32-make $target )
+                    cmd_arr=( env PATH="$PATH_WIN_FULL" mingw32-make $target )
                 fi
             # Try regular make as fallback
             else
@@ -273,16 +296,14 @@ EOF
                 export PKG_CONFIG_PATH
                 export LDFLAGS
                 export CPPFLAGS
-                # Ensure PATH is exported for the make process
-                export PATH
                 # Set Windows-style PATH for make
-                export PATH_WIN
+                export PATH_WIN_FULL
                 log "Final PATH for make: ${PATH}"
-                log "Windows PATH for make: ${PATH_WIN}"
+                log "Windows PATH for make: ${PATH_WIN_FULL}"
                 if [ -n "$extra" ]; then
-                    cmd_arr=( env PATH_WIN="$PATH_WIN" make $extra $target )
+                    cmd_arr=( env PATH="$PATH_WIN_FULL" make $extra $target )
                 else
-                    cmd_arr=( env PATH_WIN="$PATH_WIN" make $target )
+                    cmd_arr=( env PATH="$PATH_WIN_FULL" make $target )
                 fi
             fi
             ;;
