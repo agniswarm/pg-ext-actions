@@ -332,6 +332,14 @@ main() {
     # Check if PostgreSQL is ready before running tests
     if [ "$OS" = "macos" ]; then
         check_pg_ready
+        
+        # Ensure postgres role exists for testing
+        log "Ensuring postgres role exists..."
+        if [ -n "$PG_PSQL" ] && [ -x "$PG_PSQL" ]; then
+            "$PG_PSQL" -d postgres -c "CREATE ROLE postgres WITH LOGIN SUPERUSER CREATEDB CREATEROLE;" 2>/dev/null || log "postgres role already exists or creation failed"
+        elif command -v psql >/dev/null 2>&1; then
+            psql -d postgres -c "CREATE ROLE postgres WITH LOGIN SUPERUSER CREATEDB CREATEROLE;" 2>/dev/null || log "postgres role already exists or creation failed"
+        fi
     fi
     
     log "Running tests (make installcheck)..."
