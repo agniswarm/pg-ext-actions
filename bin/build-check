@@ -236,6 +236,9 @@ run_make() {
                 export PKG_CONFIG_PATH
                 export LDFLAGS
                 export CPPFLAGS
+                # Ensure PATH is exported for the make process
+                export PATH
+                log "Final PATH for make: ${PATH}"
                 if [ -n "$extra" ]; then
                     cmd_arr=( mingw32-make $extra $target )
                 else
@@ -249,6 +252,9 @@ run_make() {
                 export PKG_CONFIG_PATH
                 export LDFLAGS
                 export CPPFLAGS
+                # Ensure PATH is exported for the make process
+                export PATH
+                log "Final PATH for make: ${PATH}"
                 if [ -n "$extra" ]; then
                     cmd_arr=( make $extra $target )
                 else
