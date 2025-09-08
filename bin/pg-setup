@@ -194,6 +194,19 @@ install_postgresql_windows() {
         fi
     fi
     
+    # Install PostgreSQL development packages (includes pgxs)
+    echo "Installing PostgreSQL development packages..."
+    if ! choco install postgresql$version-dev -y; then
+        echo "Failed to install postgresql$version-dev, trying alternative package name..."
+        if ! choco install postgresql-dev --version $version -y; then
+            echo "Warning: PostgreSQL development packages not found, trying postgresql-devel..."
+            if ! choco install postgresql-devel -y; then
+                echo "Warning: Could not install PostgreSQL development packages via Chocolatey"
+                echo "This may affect extension building capabilities"
+            fi
+        fi
+    fi
+    
     # Add PostgreSQL to PATH for this session
     export PATH="$PATH:/c/Program Files/PostgreSQL/$version/bin"
     
@@ -226,23 +239,37 @@ install_postgresql_windows() {
         echo "PostgreSQL contrib is included by default on Windows"
     fi
     
-    # Derive PGXS and export to GitHub Actions environment so nmake can include pgxs.mk
+    # Verify pgxs installation and export PGXS for nmake
+    echo "Verifying PostgreSQL development installation..."
     if command -v pg_config >/dev/null 2>&1; then
+        echo "pg_config found at: $(command -v pg_config)"
         PGXS_PATH="$(pg_config --pgxs 2>/dev/null || true)"
         if [ -n "$PGXS_PATH" ]; then
             echo "PGXS determined: $PGXS_PATH"
-            # For GitHub Actions, write to GITHUB_ENV so later steps can read it
-            if [ -n "$GITHUB_ENV" ]; then
-                echo "PGXS=$PGXS_PATH" >> "$GITHUB_ENV"
+            # Verify pgxs.mk exists
+            if [ -f "$PGXS_PATH" ]; then
+                echo "pgxs.mk found at: $PGXS_PATH"
+                # For GitHub Actions, write to GITHUB_ENV so later steps can read it
+                if [ -n "$GITHUB_ENV" ]; then
+                    echo "PGXS=$PGXS_PATH" >> "$GITHUB_ENV"
+                else
+                    # Fallback for local runs
+                    export PGXS="$PGXS_PATH"
+                fi
             else
-                # Fallback for local runs
-                export PGXS="$PGXS_PATH"
+                echo "Error: pgxs.mk not found at $PGXS_PATH"
+                echo "PostgreSQL development packages may not be properly installed"
+                exit 1
             fi
         else
-            echo "Warning: pg_config --pgxs returned empty; PGXS not exported."
+            echo "Error: pg_config --pgxs returned empty; PGXS not exported."
+            echo "PostgreSQL development packages may not be properly installed"
+            exit 1
         fi
     else
-        echo "Warning: pg_config not found; PGXS cannot be exported."
+        echo "Error: pg_config not found; PGXS cannot be exported."
+        echo "PostgreSQL development packages may not be properly installed"
+        exit 1
     fi
     
     # OS-specific optimizations

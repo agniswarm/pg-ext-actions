@@ -293,9 +293,19 @@ EOF
                 # Export PGXS environment variable for nmake
                 if [ -n "$PGXS" ]; then
                     log "Using PGXS: $PGXS"
-                    export PGXS
+                    # Verify pgxs.mk exists
+                    if [ -f "$PGXS" ]; then
+                        log "pgxs.mk found at: $PGXS"
+                        export PGXS
+                    else
+                        log "Error: pgxs.mk not found at $PGXS"
+                        log "PostgreSQL development packages may not be properly installed"
+                        exit 1
+                    fi
                 else
-                    log "Warning: PGXS not set, nmake may not find pgxs.mk"
+                    log "Error: PGXS not set, nmake cannot find pgxs.mk"
+                    log "Please ensure PostgreSQL development packages are installed"
+                    exit 1
                 fi
                 if [ -n "$extra" ]; then
                     cmd_arr=( nmake /NOLOGO /F Makefile.win $extra $target )
