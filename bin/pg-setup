@@ -178,8 +178,21 @@ install_postgresql_windows() {
         powershell -Command "Set-ExecutionPolicy Bypass -Scope Process -Force; [System.Net.ServicePointManager]::SecurityProtocol = [System.Net.ServicePointManager]::SecurityProtocol -bor 3072; iex ((New-Object System.Net.WebClient).DownloadString('https://community.chocolatey.org/install.ps1'))"
     fi
     
-    # Install PostgreSQL
-    choco install postgresql --version $version -y
+    # Check available PostgreSQL packages first
+    echo "Checking available PostgreSQL packages..."
+    choco search postgresql | grep -i postgresql || true
+    
+    # Install PostgreSQL using version-specific package name
+    echo "Installing PostgreSQL $version..."
+    if ! choco install postgresql$version -y; then
+        echo "Failed to install postgresql$version, trying alternative package name..."
+        if ! choco install postgresql --version $version -y; then
+            echo "Failed to install PostgreSQL $version via Chocolatey"
+            echo "Available PostgreSQL packages:"
+            choco search postgresql
+            exit 1
+        fi
+    fi
     
     # Add PostgreSQL to PATH for this session
     export PATH="$PATH:/c/Program Files/PostgreSQL/$version/bin"
@@ -192,8 +205,15 @@ install_postgresql_windows() {
         "/c/Program Files/PostgreSQL/$version/bin/initdb.exe" -D "/c/Program Files/PostgreSQL/$version/data" || true
     fi
     
-    # Start PostgreSQL service
-    net start postgresql-x64-$version || true
+    # Start PostgreSQL service (try different service name patterns)
+    echo "Starting PostgreSQL service..."
+    if ! net start postgresql-x64-$version 2>/dev/null; then
+        echo "Trying alternative service name..."
+        if ! net start postgresql-$version 2>/dev/null; then
+            echo "Trying generic service name..."
+            net start postgresql 2>/dev/null || echo "Could not start PostgreSQL service automatically"
+        fi
+    fi
     
     # Wait for service to start
     sleep 3
