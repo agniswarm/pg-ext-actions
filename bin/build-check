@@ -248,7 +248,7 @@ EOF
             log "Makefile.win exists: $([ -f "Makefile.win" ] && echo "YES" || echo "NO")"
             log "nmake available: $(command -v nmake >/dev/null 2>&1 && echo "YES" || echo "NO")"
             
-            # If Makefile.win exists but nmake is not available, try to find it
+            # If Makefile.win exists but nmake is not available, try to find or install it
             if [ -f "Makefile.win" ] && ! command -v nmake >/dev/null 2>&1; then
                 log "Makefile.win found but nmake not available. Looking for nmake in common locations..."
                 # Look for nmake in Visual Studio Build Tools locations
@@ -262,6 +262,20 @@ EOF
                         break
                     fi
                 done
+                
+                # If still not found, try to install Visual Studio Build Tools
+                if ! command -v nmake >/dev/null 2>&1; then
+                    log "nmake not found in common locations. Attempting to install Visual Studio Build Tools..."
+                    # Try to install Visual Studio Build Tools via Chocolatey
+                    if command -v choco >/dev/null 2>&1; then
+                        log "Installing Visual Studio Build Tools via Chocolatey..."
+                        choco install visualstudio2019buildtools --package-parameters "--add Microsoft.VisualStudio.Workload.VCTools --includeRecommended --includeOptional" -y || true
+                        # Refresh PATH after installation
+                        export PATH="/c/Program Files (x86)/Microsoft Visual Studio/2019/BuildTools/VC/Tools/MSVC/*/bin/Hostx64/x64:$PATH"
+                    else
+                        log "Chocolatey not available. Cannot install nmake automatically."
+                    fi
+                fi
             fi
             
             if [ -f "Makefile.win" ] && command -v nmake >/dev/null 2>&1; then
@@ -287,6 +301,23 @@ EOF
                     cmd_arr=( env PATH="$PATH_WIN_FULL" mingw32-make $extra $target )
                 else
                     cmd_arr=( env PATH="$PATH_WIN_FULL" mingw32-make $target )
+                fi
+            # Try to find mingw32-make in common locations
+            elif [ -f "mingw32-make.exe" ] || find . -name "mingw32-make.exe" -type f >/dev/null 2>&1; then
+                log "Found mingw32-make.exe in current directory or subdirectories"
+                MINGW_MAKE_PATH=$(find . -name "mingw32-make.exe" -type f | head -1)
+                log "Using mingw32-make at: ${MINGW_MAKE_PATH}"
+                # Export environment variables for the make process
+                export PG_CONFIG
+                export PKG_CONFIG_PATH
+                export LDFLAGS
+                export CPPFLAGS
+                # Set Windows-style PATH for mingw32-make
+                export PATH_WIN_FULL
+                if [ -n "$extra" ]; then
+                    cmd_arr=( env PATH="$PATH_WIN_FULL" "$MINGW_MAKE_PATH" $extra $target )
+                else
+                    cmd_arr=( env PATH="$PATH_WIN_FULL" "$MINGW_MAKE_PATH" $target )
                 fi
             # Try regular make as fallback
             else
