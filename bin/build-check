@@ -196,8 +196,17 @@ run_make() {
             PG_CONFIG_DIR="$(dirname "$PG_CONFIG")"
             PG_ROOT="$(dirname "$PG_CONFIG_DIR")"
             
-            # Add PostgreSQL bin directory to PATH
+            # Add PostgreSQL bin directory to PATH (ensure it's first)
             export PATH="${PG_CONFIG_DIR}:${PATH}"
+            
+            # Verify pg_config is accessible
+            if ! command -v pg_config >/dev/null 2>&1; then
+                log "Warning: pg_config not found in PATH after setup"
+                log "PATH: ${PATH}"
+                log "PG_CONFIG_DIR: ${PG_CONFIG_DIR}"
+            else
+                log "pg_config found at: $(command -v pg_config)"
+            fi
             
             export PKG_CONFIG_PATH="${PG_ROOT}/lib/pkgconfig:${PKG_CONFIG_PATH:-}"
             export LDFLAGS="-L${PG_ROOT}/lib ${LDFLAGS:-}"
@@ -222,18 +231,28 @@ run_make() {
             # Try mingw32-make with environment variables
             elif command -v mingw32-make >/dev/null 2>&1; then
                 log "Using mingw32-make with environment variables"
+                # Export environment variables for the make process
+                export PG_CONFIG
+                export PKG_CONFIG_PATH
+                export LDFLAGS
+                export CPPFLAGS
                 if [ -n "$extra" ]; then
-                    cmd_arr=( env PG_CONFIG="$PG_CONFIG" PKG_CONFIG_PATH="$PKG_CONFIG_PATH" LDFLAGS="$LDFLAGS" CPPFLAGS="$CPPFLAGS" mingw32-make $extra $target )
+                    cmd_arr=( mingw32-make $extra $target )
                 else
-                    cmd_arr=( env PG_CONFIG="$PG_CONFIG" PKG_CONFIG_PATH="$PKG_CONFIG_PATH" LDFLAGS="$LDFLAGS" CPPFLAGS="$CPPFLAGS" mingw32-make $target )
+                    cmd_arr=( mingw32-make $target )
                 fi
             # Try regular make as fallback
             else
                 log "Using make as fallback"
+                # Export environment variables for the make process
+                export PG_CONFIG
+                export PKG_CONFIG_PATH
+                export LDFLAGS
+                export CPPFLAGS
                 if [ -n "$extra" ]; then
-                    cmd_arr=( env PG_CONFIG="$PG_CONFIG" PKG_CONFIG_PATH="$PKG_CONFIG_PATH" LDFLAGS="$LDFLAGS" CPPFLAGS="$CPPFLAGS" make $extra $target )
+                    cmd_arr=( make $extra $target )
                 else
-                    cmd_arr=( env PG_CONFIG="$PG_CONFIG" PKG_CONFIG_PATH="$PKG_CONFIG_PATH" LDFLAGS="$LDFLAGS" CPPFLAGS="$CPPFLAGS" make $target )
+                    cmd_arr=( make $target )
                 fi
             fi
             ;;
