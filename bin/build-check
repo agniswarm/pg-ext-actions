@@ -196,8 +196,26 @@ run_make() {
             PG_CONFIG_DIR="$(dirname "$PG_CONFIG")"
             PG_ROOT="$(dirname "$PG_CONFIG_DIR")"
             
+            # Convert Unix-style paths to Windows-style for Windows make tools
+            PG_CONFIG_DIR_WIN=$(echo "$PG_CONFIG_DIR" | sed 's|^/c/|C:/|' | sed 's|/|\\|g')
+            PG_ROOT_WIN=$(echo "$PG_ROOT" | sed 's|^/c/|C:/|' | sed 's|/|\\|g')
+            
             # Add PostgreSQL bin directory to PATH (ensure it's first)
             export PATH="${PG_CONFIG_DIR}:${PATH}"
+            
+            # Set Windows-style PATH for make tools
+            export PATH_WIN="${PG_CONFIG_DIR_WIN};${PATH_WIN:-}"
+            
+            # Create a wrapper script for pg_config in the current directory
+            # This ensures mingw32-make can find pg_config even if PATH issues persist
+            cat > pg_config_wrapper.sh << 'EOF'
+#!/bin/bash
+# Wrapper script for pg_config
+exec "$PG_CONFIG" "$@"
+EOF
+            chmod +x pg_config_wrapper.sh
+            # Add current directory to PATH so the wrapper is found
+            export PATH=".:${PATH}"
             
             # Verify pg_config is accessible
             if ! command -v pg_config >/dev/null 2>&1; then
@@ -238,11 +256,14 @@ run_make() {
                 export CPPFLAGS
                 # Ensure PATH is exported for the make process
                 export PATH
+                # Set Windows-style PATH for mingw32-make
+                export PATH_WIN
                 log "Final PATH for make: ${PATH}"
+                log "Windows PATH for mingw32-make: ${PATH_WIN}"
                 if [ -n "$extra" ]; then
-                    cmd_arr=( mingw32-make $extra $target )
+                    cmd_arr=( env PATH_WIN="$PATH_WIN" mingw32-make $extra $target )
                 else
-                    cmd_arr=( mingw32-make $target )
+                    cmd_arr=( env PATH_WIN="$PATH_WIN" mingw32-make $target )
                 fi
             # Try regular make as fallback
             else
@@ -254,11 +275,14 @@ run_make() {
                 export CPPFLAGS
                 # Ensure PATH is exported for the make process
                 export PATH
+                # Set Windows-style PATH for make
+                export PATH_WIN
                 log "Final PATH for make: ${PATH}"
+                log "Windows PATH for make: ${PATH_WIN}"
                 if [ -n "$extra" ]; then
-                    cmd_arr=( make $extra $target )
+                    cmd_arr=( env PATH_WIN="$PATH_WIN" make $extra $target )
                 else
-                    cmd_arr=( make $target )
+                    cmd_arr=( env PATH_WIN="$PATH_WIN" make $target )
                 fi
             fi
             ;;
