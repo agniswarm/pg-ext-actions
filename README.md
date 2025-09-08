@@ -323,9 +323,21 @@ jobs:
 
 - **🔄 Cross-Platform**: Works on Linux, macOS, and Windows
 - **🎯 OS Version Targeting**: Specify exact OS versions (e.g., `ubuntu-24.04`, `macos-14`)
+- **🤖 CI-Aware**: Automatically detects CI environments and skips service management
 - **🔧 Auto-Configuration**: Automatically sets up PostgreSQL development environment
 - **🧪 Comprehensive Testing**: Build, install, and test extensions with regression testing
 - **📦 Dependency Management**: Install extension dependencies from Git repositories
 - **🔄 Update Validation**: Test extension version upgrade scenarios
 - **🎨 Rich Logging**: Colored output with clear success/error indicators
 - **⚡ Fast Setup**: One-command PostgreSQL installation and configuration
+
+## 🤖 CI Environment Behavior
+
+The actions automatically detect CI environments (GitHub Actions, GitLab CI, etc.) and adjust their behavior:
+
+- **Service Management**: Skips starting/stopping PostgreSQL services in CI
+- **Database Initialization**: Skips database creation in CI (assumes CI handles this)
+- **Health Checks**: Skips PostgreSQL readiness checks in CI
+- **Environment Setup**: Still configures all necessary environment variables and paths
+
+This ensures the actions work seamlessly in CI environments where PostgreSQL is typically managed by the CI system itself.

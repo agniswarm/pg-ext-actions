@@ -84,7 +84,15 @@ local all all trust
 host all all 0/0 trust
 host all all ::0/0 trust
 EOF
-    sudo service postgresql reload
+    
+    # Start PostgreSQL service (skip in CI environments)
+    if [ -z "$CI" ] && [ -z "$GITHUB_ACTIONS" ]; then
+        sudo service postgresql reload
+        sudo service postgresql start
+    else
+        echo "CI environment detected - PostgreSQL service management skipped"
+        echo "PostgreSQL packages installed and configured"
+    fi
     
     # OS-specific optimizations
     case "$os_version" in
@@ -131,14 +139,19 @@ install_postgresql_macos() {
     echo 'export LDFLAGS="-L/opt/homebrew/opt/postgresql@'$version'/lib $LDFLAGS"' >> ~/.zshrc
     echo 'export CPPFLAGS="-I/opt/homebrew/opt/postgresql@'$version'/include $CPPFLAGS"' >> ~/.zshrc
     
-    # Start PostgreSQL service
-    brew services start postgresql@$version
-    
-    # Wait a moment for the service to start
-    sleep 3
-    
-    # Create database using full path
-    /opt/homebrew/opt/postgresql@$version/bin/createdb postgres || true
+    # Start PostgreSQL service (skip in CI environments)
+    if [ -z "$CI" ] && [ -z "$GITHUB_ACTIONS" ]; then
+        brew services start postgresql@$version
+        
+        # Wait a moment for the service to start
+        sleep 3
+        
+        # Create database using full path
+        /opt/homebrew/opt/postgresql@$version/bin/createdb postgres || true
+    else
+        echo "CI environment detected - PostgreSQL service management skipped"
+        echo "PostgreSQL binaries installed and environment configured"
+    fi
     
     # Install contrib if needed
     if [[ $contrib == 'true' ]]; then
@@ -189,6 +202,9 @@ install_postgresql_windows() {
     
     # Wait for service to start
     sleep 3
+    
+    # Create database
+    "/c/Program Files/PostgreSQL/$version/bin/createdb.exe" postgres || true
     
     # Install contrib if needed
     if [[ $contrib == 'true' ]]; then

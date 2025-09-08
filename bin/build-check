@@ -207,12 +207,14 @@ run_make() {
              PG_ISREADY="$(find_pg_utility "pg_isready" "$PG_CONFIG")"
              PG_CREATEDB="$(find_pg_utility "createdb" "$PG_CONFIG")"
              
-             # Export utility paths for use in make commands
+             # Export utility paths for use in make commands and test scripts
              if [ -n "$PG_PSQL" ]; then
                  export PG_PSQL="$PG_PSQL"
              fi
              if [ -n "$PG_ISREADY" ]; then
                  export PG_ISREADY="$PG_ISREADY"
+                 # Also add to PATH so test scripts can find it
+                 export PATH="$(dirname "$PG_ISREADY"):$PATH"
              fi
              if [ -n "$PG_CREATEDB" ]; then
                  export PG_CREATEDB="$PG_CREATEDB"
@@ -230,9 +232,9 @@ run_make() {
 
             if [ "$target" = "install" ]; then
                 if [ -n "$extra" ]; then
-                    cmd_arr=( sudo -E env PG_CONFIG="$PG_CONFIG" PKG_CONFIG_PATH="$PKG_CONFIG_PATH" LDFLAGS="$LDFLAGS" CPPFLAGS="$CPPFLAGS" PG_PSQL="${PG_PSQL:-}" PG_ISREADY="${PG_ISREADY:-}" PG_CREATEDB="${PG_CREATEDB:-}" make $extra $target )
+                    cmd_arr=( sudo -E env PATH="$PATH" PG_CONFIG="$PG_CONFIG" PKG_CONFIG_PATH="$PKG_CONFIG_PATH" LDFLAGS="$LDFLAGS" CPPFLAGS="$CPPFLAGS" PG_PSQL="${PG_PSQL:-}" PG_ISREADY="${PG_ISREADY:-}" PG_CREATEDB="${PG_CREATEDB:-}" make $extra $target )
                 else
-                    cmd_arr=( sudo -E env PG_CONFIG="$PG_CONFIG" PKG_CONFIG_PATH="$PKG_CONFIG_PATH" LDFLAGS="$LDFLAGS" CPPFLAGS="$CPPFLAGS" PG_PSQL="${PG_PSQL:-}" PG_ISREADY="${PG_ISREADY:-}" PG_CREATEDB="${PG_CREATEDB:-}" make $target )
+                    cmd_arr=( sudo -E env PATH="$PATH" PG_CONFIG="$PG_CONFIG" PKG_CONFIG_PATH="$PKG_CONFIG_PATH" LDFLAGS="$LDFLAGS" CPPFLAGS="$CPPFLAGS" PG_PSQL="${PG_PSQL:-}" PG_ISREADY="${PG_ISREADY:-}" PG_CREATEDB="${PG_CREATEDB:-}" make $target )
                 fi
             else
                 if [ -n "$extra" ]; then
@@ -327,8 +329,8 @@ main() {
         exit 2
     fi
 
-    # Check if PostgreSQL is ready before running tests
-    if [ "$OS" = "macos" ]; then
+    # Check if PostgreSQL is ready before running tests (skip in CI environments)
+    if [ "$OS" = "macos" ] && [ -z "$CI" ] && [ -z "$GITHUB_ACTIONS" ]; then
         check_pg_ready
     fi
     
