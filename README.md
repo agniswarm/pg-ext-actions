@@ -108,6 +108,7 @@ Build, install, and test PostgreSQL extensions with comprehensive regression tes
   - `mingw32-make -f Makefile.win` (default)
   - `nmake /F Makefile.win` (if Visual Studio Build Tools available)
   - `make` (fallback)
+  - **PGXS Fallback**: If `pgxs.mk` not found, automatically downloads PostgreSQL source
 - **macOS**: Automatically sets up PostgreSQL development environment (Homebrew paths, `PG_CONFIG`, etc.)
 
 ### `install-dependency`
@@ -352,6 +353,43 @@ jobs:
 - Git for Windows
 - PowerShell execution policy set to allow script execution
 - Visual Studio Build Tools (for compilation)
+
+## 🔧 Troubleshooting
+
+### Windows PGXS Issues
+
+If you encounter `PGXS not found` errors on Windows:
+
+1. **Automatic Fallback**: The actions automatically download PostgreSQL source when `pgxs.mk` is not available
+2. **Manual Download**: If automatic fallback fails, you can manually download:
+
+   ```bash
+   curl -LO https://ftp.postgresql.org/pub/source/v14.13/postgresql-14.13.tar.bz2
+   tar -xjf postgresql-14.13.tar.bz2
+   echo "PGXS=$(pwd)/postgresql-14.13/src/makefiles/pgxs.mk" >> $GITHUB_ENV
+   ```
+
+### MinGW Compiler Issues
+
+If you get `cc: command not found` errors:
+
+1. **Automatic Detection**: The actions automatically find and configure MinGW compilers
+2. **Manual Installation**: Install MinGW via Chocolatey:
+
+   ```bash
+   choco install mingw -y
+   ```
+
+### Make Tool Selection
+
+For Windows builds, you can specify the make tool:
+
+```yaml
+- uses: agniswarm/pg-ext-actions/build-check@master
+  with:
+    operating-system: 'windows-2022'
+    make-tool: 'nmake'  # or 'mingw32-make' or 'make'
+```
 
 ## 🎯 Key Features
 

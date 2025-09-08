@@ -166,6 +166,105 @@ install_postgresql_macos() {
     esac
 }
 
+# Install PGXS from PostgreSQL source when not available
+install_pgxs_from_source() {
+    local version="$1"
+    local pg_version=""
+    
+    # Map version numbers to source versions
+    case "$version" in
+        17) pg_version="17.0" ;;
+        16) pg_version="16.4" ;;
+        15) pg_version="15.8" ;;
+        14) pg_version="14.13" ;;
+        13) pg_version="13.16" ;;
+        *)
+            echo "Error: PostgreSQL version $version not supported for source download"
+            echo "Supported versions: 13, 14, 15, 16, 17"
+            return 1
+            ;;
+    esac
+    
+    echo "Downloading PostgreSQL $pg_version source for pgxs.mk..."
+    
+    # Download PostgreSQL source
+    local source_url="https://ftp.postgresql.org/pub/source/v${pg_version}/postgresql-${pg_version}.tar.bz2"
+    local source_file="postgresql-${pg_version}.tar.bz2"
+    
+    echo "Downloading from: $source_url"
+    
+    # Download the source
+    if command -v curl >/dev/null 2>&1; then
+        curl -LO "$source_url"
+    elif command -v wget >/dev/null 2>&1; then
+        wget "$source_url"
+    else
+        echo "Error: Neither curl nor wget found. Cannot download PostgreSQL source"
+        return 1
+    fi
+    
+    if [[ ! -f "$source_file" ]]; then
+        echo "Error: Failed to download PostgreSQL source"
+        return 1
+    fi
+    
+    echo "Downloaded: $source_file"
+    
+    # Extract the source
+    echo "Extracting PostgreSQL source..."
+    if command -v tar >/dev/null 2>&1; then
+        tar -xjf "$source_file"
+    else
+        echo "Error: tar not found. Cannot extract PostgreSQL source"
+        rm -f "$source_file"
+        return 1
+    fi
+    
+    # Find the extracted directory
+    local extracted_dir=""
+    for dir in postgresql-*; do
+        if [[ -d "$dir" ]]; then
+            extracted_dir="$dir"
+            break
+        fi
+    done
+    
+    if [[ -z "$extracted_dir" ]]; then
+        echo "Error: Could not find extracted PostgreSQL directory"
+        rm -f "$source_file"
+        return 1
+    fi
+    
+    echo "Found extracted directory: $extracted_dir"
+    
+    # Set PGXS path
+    local pgxs_path="$(pwd)/${extracted_dir}/src/makefiles/pgxs.mk"
+    
+    if [[ -f "$pgxs_path" ]]; then
+        echo "PGXS found at: $pgxs_path"
+        
+        # For GitHub Actions, write to GITHUB_ENV
+        if [ -n "$GITHUB_ENV" ]; then
+            echo "PGXS=$pgxs_path" >> "$GITHUB_ENV"
+            echo "PGXS exported to GITHUB_ENV: $pgxs_path"
+        else
+            # Fallback for local runs
+            export PGXS="$pgxs_path"
+            echo "PGXS exported to environment: $pgxs_path"
+        fi
+        
+        # Clean up the downloaded file but keep the extracted directory
+        rm -f "$source_file"
+        echo "PostgreSQL source downloaded and extracted successfully"
+        echo "PGXS available at: $pgxs_path"
+    else
+        echo "Error: pgxs.mk not found in extracted directory"
+        rm -f "$source_file"
+        rm -rf "$extracted_dir"
+        return 1
+    fi
+}
+
 # Function to install PostgreSQL on Windows using direct download from EnterpriseDB
 install_postgresql_windows() {
     local version=$1
@@ -300,24 +399,26 @@ install_postgresql_windows() {
         echo "PostgreSQL contrib is included by default on Windows"
     fi
     
-    # Derive PGXS and export to GitHub Actions environment so nmake can include pgxs.mk
-    if command -v pg_config >/dev/null 2>&1; then
-        PGXS_PATH="$(pg_config --pgxs 2>/dev/null || true)"
-        if [ -n "$PGXS_PATH" ]; then
-            echo "PGXS determined: $PGXS_PATH"
-            # For GitHub Actions, write to GITHUB_ENV so later steps can read it
-            if [ -n "$GITHUB_ENV" ]; then
-                echo "PGXS=$PGXS_PATH" >> "$GITHUB_ENV"
+        # Derive PGXS and export to GitHub Actions environment so nmake can include pgxs.mk
+        if command -v pg_config >/dev/null 2>&1; then
+            PGXS_PATH="$(pg_config --pgxs 2>/dev/null || true)"
+            if [ -n "$PGXS_PATH" ]; then
+                echo "PGXS determined: $PGXS_PATH"
+                # For GitHub Actions, write to GITHUB_ENV so later steps can read it
+                if [ -n "$GITHUB_ENV" ]; then
+                    echo "PGXS=$PGXS_PATH" >> "$GITHUB_ENV"
+                else
+                    # Fallback for local runs
+                    export PGXS="$PGXS_PATH"
+                fi
             else
-                # Fallback for local runs
-                export PGXS="$PGXS_PATH"
+                echo "Warning: pg_config --pgxs returned empty; attempting to build PostgreSQL from source for pgxs.mk"
+                install_pgxs_from_source "$version"
             fi
         else
-            echo "Warning: pg_config --pgxs returned empty; PGXS not exported."
+            echo "Warning: pg_config not found; attempting to build PostgreSQL from source for pgxs.mk"
+            install_pgxs_from_source "$version"
         fi
-    else
-        echo "Warning: pg_config not found; PGXS cannot be exported."
-    fi
     
     # OS-specific optimizations
     case "$os_version" in

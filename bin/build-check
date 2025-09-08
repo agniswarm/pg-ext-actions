@@ -76,6 +76,107 @@ find_pg_utility() {
     return 1
 }
 
+# Install PGXS from PostgreSQL source when not available (Windows)
+install_pgxs_from_source_windows() {
+    # Try to determine PostgreSQL version from pg_config
+    local pg_version=""
+    if command -v pg_config >/dev/null 2>&1; then
+        pg_version=$(pg_config --version | grep -oE '[0-9]+\.[0-9]+' | head -1 | cut -d. -f1)
+    else
+        log "Cannot determine PostgreSQL version, defaulting to 14"
+        pg_version="14"
+    fi
+    
+    local source_version=""
+    case "$pg_version" in
+        17) source_version="17.0" ;;
+        16) source_version="16.4" ;;
+        15) source_version="15.8" ;;
+        14) source_version="14.13" ;;
+        13) source_version="13.16" ;;
+        *)
+            log "PostgreSQL version $pg_version not supported for source download"
+            return 1
+            ;;
+    esac
+    
+    log "Downloading PostgreSQL $source_version source for pgxs.mk..."
+    
+    # Download PostgreSQL source
+    local source_url="https://ftp.postgresql.org/pub/source/v${source_version}/postgresql-${source_version}.tar.bz2"
+    local source_file="postgresql-${source_version}.tar.bz2"
+    
+    log "Downloading from: $source_url"
+    
+    # Download the source
+    if command -v curl >/dev/null 2>&1; then
+        curl -LO "$source_url"
+    elif command -v wget >/dev/null 2>&1; then
+        wget "$source_url"
+    else
+        log "Error: Neither curl nor wget found. Cannot download PostgreSQL source"
+        return 1
+    fi
+    
+    if [[ ! -f "$source_file" ]]; then
+        log "Error: Failed to download PostgreSQL source"
+        return 1
+    fi
+    
+    log "Downloaded: $source_file"
+    
+    # Extract the source
+    log "Extracting PostgreSQL source..."
+    if command -v tar >/dev/null 2>&1; then
+        tar -xjf "$source_file"
+    else
+        log "Error: tar not found. Cannot extract PostgreSQL source"
+        rm -f "$source_file"
+        return 1
+    fi
+    
+    # Find the extracted directory
+    local extracted_dir=""
+    for dir in postgresql-*; do
+        if [[ -d "$dir" ]]; then
+            extracted_dir="$dir"
+            break
+        fi
+    done
+    
+    if [[ -z "$extracted_dir" ]]; then
+        log "Error: Could not find extracted PostgreSQL directory"
+        rm -f "$source_file"
+        return 1
+    fi
+    
+    log "Found extracted directory: $extracted_dir"
+    
+    # Set PGXS path
+    local pgxs_path="$(pwd)/${extracted_dir}/src/makefiles/pgxs.mk"
+    
+    if [[ -f "$pgxs_path" ]]; then
+        log "PGXS found at: $pgxs_path"
+        export PGXS="$pgxs_path"
+        
+        # For GitHub Actions, write to GITHUB_ENV
+        if [ -n "$GITHUB_ENV" ]; then
+            echo "PGXS=$pgxs_path" >> "$GITHUB_ENV"
+            log "PGXS exported to GITHUB_ENV: $pgxs_path"
+        fi
+        
+        # Clean up the downloaded file but keep the extracted directory
+        rm -f "$source_file"
+        log "PostgreSQL source downloaded and extracted successfully"
+        return 0
+    else
+        log "Error: pgxs.mk not found in extracted directory"
+        rm -f "$source_file"
+        rm -rf "$extracted_dir"
+        return 1
+    fi
+}
+
 # Windows-specific tool detection functions
 detect_windows_build_tools() {
     local preferred_tool="${1:-}"  # optional preferred tool (mingw32-make, nmake, make)
@@ -101,6 +202,27 @@ detect_windows_build_tools() {
                         found_tool="mingw32-make"
                         tool_dir="$(dirname "$tool_path")"
                         log "Found requested mingw32-make: $tool_path"
+                        
+                        # Check if MinGW compiler is also available
+                        local mingw_base="$(dirname "$tool_dir")"
+                        local cc_path="$mingw_base/bin/gcc.exe"
+                        if [ -x "$cc_path" ]; then
+                            log "MinGW compiler found: $cc_path"
+                            # Add MinGW bin to PATH for compiler access
+                            if [[ ":$PATH:" != *":$mingw_base/bin:"* ]]; then
+                                export PATH="$mingw_base/bin:$PATH"
+                                log "Added MinGW compiler to PATH: $mingw_base/bin"
+                                
+                                # Also add to GITHUB_PATH for persistence
+                                if [ -n "$GITHUB_PATH" ]; then
+                                    echo "$mingw_base/bin" >> "$GITHUB_PATH"
+                                    log "Added MinGW compiler to GITHUB_PATH"
+                                fi
+                            fi
+                        else
+                            log "Warning: MinGW compiler not found at $cc_path"
+                            log "Build may fail due to missing C compiler"
+                        fi
                         break
                     fi
                 done
@@ -111,6 +233,27 @@ detect_windows_build_tools() {
                     found_tool="mingw32-make"
                     tool_dir="$(dirname "$tool_path")"
                     log "Found requested mingw32-make via command -v: $tool_path"
+                    
+                    # Try to find MinGW compiler in the same directory structure
+                    local mingw_base="$(dirname "$tool_dir")"
+                    local cc_path="$mingw_base/bin/gcc.exe"
+                    if [ -x "$cc_path" ]; then
+                        log "MinGW compiler found: $cc_path"
+                        # Add MinGW bin to PATH for compiler access
+                        if [[ ":$PATH:" != *":$mingw_base/bin:"* ]]; then
+                            export PATH="$mingw_base/bin:$PATH"
+                            log "Added MinGW compiler to PATH: $mingw_base/bin"
+                            
+                            # Also add to GITHUB_PATH for persistence
+                            if [ -n "$GITHUB_PATH" ]; then
+                                echo "$mingw_base/bin" >> "$GITHUB_PATH"
+                                log "Added MinGW compiler to GITHUB_PATH"
+                            fi
+                        fi
+                    else
+                        log "Warning: MinGW compiler not found at $cc_path"
+                        log "Build may fail due to missing C compiler"
+                    fi
                 fi
                 ;;
             "nmake")
@@ -231,6 +374,27 @@ detect_windows_build_tools() {
             found_tool="mingw32-make"
             tool_dir="$(dirname "$tool_path")"
             log "Found mingw32-make: $tool_path"
+            
+            # Check if MinGW compiler is also available
+            local mingw_base="$(dirname "$tool_dir")"
+            local cc_path="$mingw_base/bin/gcc.exe"
+            if [ -x "$cc_path" ]; then
+                log "MinGW compiler found: $cc_path"
+                # Add MinGW bin to PATH for compiler access
+                if [[ ":$PATH:" != *":$mingw_base/bin:"* ]]; then
+                    export PATH="$mingw_base/bin:$PATH"
+                    log "Added MinGW compiler to PATH: $mingw_base/bin"
+                    
+                    # Also add to GITHUB_PATH for persistence
+                    if [ -n "$GITHUB_PATH" ]; then
+                        echo "$mingw_base/bin" >> "$GITHUB_PATH"
+                        log "Added MinGW compiler to GITHUB_PATH"
+                    fi
+                fi
+            else
+                log "Warning: MinGW compiler not found at $cc_path"
+                log "Build may fail due to missing C compiler"
+            fi
             break
         fi
     done
@@ -241,6 +405,27 @@ detect_windows_build_tools() {
         found_tool="mingw32-make"
         tool_dir="$(dirname "$tool_path")"
         log "Found mingw32-make via command -v: $tool_path"
+        
+        # Try to find MinGW compiler in the same directory structure
+        local mingw_base="$(dirname "$tool_dir")"
+        local cc_path="$mingw_base/bin/gcc.exe"
+        if [ -x "$cc_path" ]; then
+            log "MinGW compiler found: $cc_path"
+            # Add MinGW bin to PATH for compiler access
+            if [[ ":$PATH:" != *":$mingw_base/bin:"* ]]; then
+                export PATH="$mingw_base/bin:$PATH"
+                log "Added MinGW compiler to PATH: $mingw_base/bin"
+                
+                # Also add to GITHUB_PATH for persistence
+                if [ -n "$GITHUB_PATH" ]; then
+                    echo "$mingw_base/bin" >> "$GITHUB_PATH"
+                    log "Added MinGW compiler to GITHUB_PATH"
+                fi
+            fi
+        else
+            log "Warning: MinGW compiler not found at $cc_path"
+            log "Build may fail due to missing C compiler"
+        fi
     fi
     
     # 2. Check for nmake.exe (second priority) - only if mingw32-make not found
@@ -329,36 +514,72 @@ detect_windows_build_tools() {
         fi
     fi
     
-    # 4. If still no tool found, try to install Visual Studio Build Tools for nmake
+    # 4. If still no tool found, try to install build tools
     if [ -z "$found_tool" ]; then
-        log "No build tools found. Attempting to install Visual Studio Build Tools for nmake..."
+        log "No build tools found. Attempting to install build tools..."
         
-        # Try to install Visual Studio Build Tools via Chocolatey
+        # Try to install MinGW first (lighter than Visual Studio)
         if command -v choco >/dev/null 2>&1; then
-            log "Installing Visual Studio Build Tools via Chocolatey..."
-            choco install visualstudio2019buildtools --package-parameters "--add Microsoft.VisualStudio.Component.VC.Tools --includeRecommended --includeOptional" -y || true
+            log "Installing MinGW via Chocolatey..."
+            choco install mingw -y || true
             
             # Wait for installation to complete
-            sleep 10
+            sleep 5
             
-            # Check again for nmake after installation
-            log "Checking for nmake after installation..."
-            for nmake_pattern in \
-                "/c/Program Files (x86)/Microsoft Visual Studio/2019/BuildTools/VC/Tools/MSVC/*/bin/Hostx64/x64/nmake.exe" \
-                "/c/Program Files (x86)/Microsoft Visual Studio/2022/BuildTools/VC/Tools/MSVC/*/bin/Hostx64/x64/nmake.exe"; do
+            # Check again for mingw32-make after installation
+            log "Checking for mingw32-make after installation..."
+            for mingw_pattern in \
+                "/c/ProgramData/chocolatey/lib/mingw/tools/install/mingw64/bin/mingw32-make.exe" \
+                "/c/msys64/mingw64/bin/mingw32-make.exe" \
+                "/c/msys64/usr/bin/mingw32-make.exe"; do
                 
-                if ls $nmake_pattern >/dev/null 2>&1; then
-                    tool_path=$(ls $nmake_pattern | head -1)
-                    if [ -x "$tool_path" ]; then
-                        found_tool="nmake"
-                        tool_dir="$(dirname "$tool_path")"
-                        log "Found nmake after installation: $tool_path"
-                        break
+                if [ -x "$mingw_pattern" ]; then
+                    tool_path="$mingw_pattern"
+                    found_tool="mingw32-make"
+                    tool_dir="$(dirname "$tool_path")"
+                    log "Found mingw32-make after installation: $tool_path"
+                    
+                    # Check for MinGW compiler
+                    local mingw_base="$(dirname "$tool_dir")"
+                    local cc_path="$mingw_base/bin/gcc.exe"
+                    if [ -x "$cc_path" ]; then
+                        log "MinGW compiler found: $cc_path"
+                        export PATH="$mingw_base/bin:$PATH"
+                        if [ -n "$GITHUB_PATH" ]; then
+                            echo "$mingw_base/bin" >> "$GITHUB_PATH"
+                        fi
                     fi
+                    break
                 fi
             done
+            
+            # If MinGW installation failed, try Visual Studio Build Tools
+            if [ -z "$found_tool" ]; then
+                log "MinGW installation failed, trying Visual Studio Build Tools..."
+                choco install visualstudio2019buildtools --package-parameters "--add Microsoft.VisualStudio.Component.VC.Tools --includeRecommended --includeOptional" -y || true
+                
+                # Wait for installation to complete
+                sleep 10
+                
+                # Check again for nmake after installation
+                log "Checking for nmake after installation..."
+                for nmake_pattern in \
+                    "/c/Program Files (x86)/Microsoft Visual Studio/2019/BuildTools/VC/Tools/MSVC/*/bin/Hostx64/x64/nmake.exe" \
+                    "/c/Program Files (x86)/Microsoft Visual Studio/2022/BuildTools/VC/Tools/MSVC/*/bin/Hostx64/x64/nmake.exe"; do
+                    
+                    if ls $nmake_pattern >/dev/null 2>&1; then
+                        tool_path=$(ls $nmake_pattern | head -1)
+                        if [ -x "$tool_path" ]; then
+                            found_tool="nmake"
+                            tool_dir="$(dirname "$tool_path")"
+                            log "Found nmake after installation: $tool_path"
+                            break
+                        fi
+                    fi
+                done
+            fi
         else
-            log "Chocolatey not available. Cannot install nmake automatically."
+            log "Chocolatey not available. Cannot install build tools automatically."
         fi
     fi
     
@@ -531,6 +752,14 @@ run_make() {
             # Choose build method based on detected tool
             case "$build_tool" in
                 "mingw32-make")
+                    # Check if C compiler is available
+                    if ! command -v gcc >/dev/null 2>&1 && ! command -v cc >/dev/null 2>&1; then
+                        err "C compiler (gcc or cc) not found in PATH"
+                        err "MinGW compiler may not be properly installed or not in PATH"
+                        err "Current PATH: $PATH"
+                        exit 1
+                    fi
+                    
                     if [ -f "Makefile.win" ]; then
                         log "Using mingw32-make with Makefile.win (preferred for Windows builds)"
                         # Export PGXS environment variable for mingw32-make
@@ -538,7 +767,10 @@ run_make() {
                             log "Using PGXS: $PGXS"
                             export PGXS
                         else
-                            log "Warning: PGXS not set, mingw32-make may not find pgxs.mk"
+                            log "Warning: PGXS not set, attempting to download PostgreSQL source for pgxs.mk"
+                            if ! install_pgxs_from_source_windows; then
+                                log "Failed to install PGXS from source, build may fail"
+                            fi
                         fi
                         # Export environment variables for the make process
                         export PG_CONFIG
@@ -574,7 +806,10 @@ run_make() {
                             log "Using PGXS: $PGXS"
                             export PGXS
                         else
-                            log "Warning: PGXS not set, nmake may not find pgxs.mk"
+                            log "Warning: PGXS not set, attempting to download PostgreSQL source for pgxs.mk"
+                            if ! install_pgxs_from_source_windows; then
+                                log "Failed to install PGXS from source, build may fail"
+                            fi
                         fi
                         if [ -n "$extra" ]; then
                             cmd_arr=( nmake /NOLOGO /F Makefile.win $extra $target )
